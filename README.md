@@ -11,7 +11,7 @@ Homebrew Game Boy Color games for the ModRetro Chromatic, built with GBDK-2020 (
 - Each folder under `src/` (except `common`) builds into its own ROM: `build\<folder>.gbc`
 
 ## Working together
-Two of us work in this repo with separate Claude Code agents. The rules are in [CLAUDE.md](CLAUDE.md), and every agent loads them automatically. Short version: every change goes on a personal branch (`adam/...` or `babel/...`), then a PR into `main`. Open PRs mark work as taken, and messages go in PR notes or `Heads-up:` issues.
+Two of us work in this repo with separate Claude Code agents. The rules are in [CLAUDE.md](CLAUDE.md), and every agent loads them automatically. Short version: every change goes on a personal branch (`adam/...` or `charlie/...`), then a PR into `main`. Open PRs mark work as taken, and messages go in PR notes or `Heads-up:` issues.
 
 ## Tools
 **Windows:**

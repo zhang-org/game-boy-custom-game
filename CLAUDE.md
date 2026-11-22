@@ -1,11 +1,11 @@
 # Game Boy mini games: rules for Claude agents
 
-Two brothers work on this repo, each with their own Claude Code agent, on separate computers and GitHub accounts:
+Two brothers, Adam and Charlie, work on this repo, each with their own Claude Code agent, on separate computers and GitHub accounts:
 
 | Human | GitHub | Computer | Branch prefix |
 |---|---|---|---|
 | Adam | `adamzhang06` | Mac | `adam/` |
-| Brother | `Babelfisher-txz` | Windows | `babel/` |
+| Charlie | `Babelfisher-txz` | Windows | `charlie/` |
 
 You are one of those agents. The other agent can't see your conversation. It only sees what reaches GitHub: commits, PRs, PR comments and issues. Everything in this file exists so the two of you never overwrite each other's work and always know what the other one is doing.
 
@@ -15,7 +15,7 @@ What we're making: a collection of Game Boy Color mini games starring real famil
 
 A hook prints a sync report at the start of every session and tells you whenever `main` has moved. Act on it:
 
-1. **Find out who you're working for.** Run `gh api user --jq .login` and use the table above. Use that person's branch prefix, and refer to the other person as "your brother".
+1. **Find out who you're working for.** Run `gh api user --jq .login` and use the table above. Use that person's branch prefix, and refer to the other one by name.
 2. **Read what changed.** If `main` has new commits, skim them (`git log --oneline HEAD..origin/main`). Also read any new files in [docs/decisions/](docs/decisions/).
 3. **Check what the other side is doing.** Look at the open PRs and issues in the report. Open PRs (including drafts) are claims: don't edit the files a PR from the other person is changing. If your task overlaps one, tell your human before writing any code.
 4. **Start from the latest `main`.** A new task gets a new branch:
@@ -59,7 +59,7 @@ Write these for an agent who knows nothing about your conversation.
 
 - Either brother can merge any PR, including their own. **Merge only when your human tells you to.**
 - **To review a PR:** run `gh pr view <n>`, `gh pr diff <n>` and `gh pr view <n> --comments`. To build it without disturbing your own work, use a separate worktree: `git worktree add ../gb-review-<n> origin/<branch>`. Remove it afterwards with `git worktree remove ../gb-review-<n>`.
-- Before a PR is merged, it must be rebased on the latest `main`, build with no errors (warning 158 is harmless), and have a filled-in PR description.
+- Before a PR is merged, it must be rebased on the latest `main`, build with no errors (warnings 158 and 110 are harmless), and have a filled-in PR description.
 - Merge with `gh pr merge <n> --squash --delete-branch`. Afterwards, check whether any of your human's open branches need a rebase.
 - If a rebase hits conflicts in someone else's files, stop and ask your human. Don't guess.
 
