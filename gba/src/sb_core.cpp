@@ -33,7 +33,7 @@ namespace sb
         if(bn::keypad::select_pressed())
         {
             toggle_music();
-            g_toast.set(116, -72, music_enabled() ? "} On" : "} Off", text_color::WHITE, align::RIGHT);
+            g_toast.set(116, 72, music_enabled() ? "} On" : "} Off", text_color::WHITE, align::RIGHT);
             g_toast_timer = 75;
         }
 
