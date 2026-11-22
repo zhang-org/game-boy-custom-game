@@ -10,3 +10,11 @@ build/
 *.noi
 *.sym
 *.ihx
+
+# Personal Claude settings (not shared)
+CLAUDE.local.md
+.claude/settings.local.json
+
+# OS junk
+.DS_Store
+Thumbs.db
