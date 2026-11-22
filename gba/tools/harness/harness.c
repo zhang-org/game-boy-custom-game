@@ -1,7 +1,8 @@
 // Headless mGBA test harness: plays a ROM with scripted button presses and saves screenshots.
 // Optional developer tool (the game does not need it). Build with tools/harness/build_harness.sh.
 //
-// Usage: gbaharness <rom.gba> <script.txt> <out_dir> [--sav file.sav]
+// Usage: gbaharness <rom.gba> <script.txt> <out_dir> [--sav file.sav] [--wav sound.wav]
+// --wav records the sound output (32768 Hz stereo, 16-bit) to check volume levels.
 //
 // Script commands, one per line (# starts a comment):
 //   wait N                 run N frames with no buttons held
@@ -17,6 +18,7 @@
 #include <mgba/core/config.h>
 #include <mgba/core/log.h>
 #include <mgba-util/png-io.h>
+#include <mgba/core/blip_buf.h>
 #include <mgba-util/vfs.h>
 
 #include <ctype.h>
@@ -70,10 +72,30 @@ static color_t* framebuffer;
 static unsigned width, height;
 static long frame_no = 0;
 
+static FILE* wav_file = NULL;
+static long wav_samples = 0;
+
+static void drain_audio(void) {
+    if (!wav_file) return;
+    struct blip_t* left = core->getAudioChannel(core, 0);
+    struct blip_t* right = core->getAudioChannel(core, 1);
+    short l[1024], r[1024], lr[2048];
+    int avail;
+    while ((avail = blip_samples_avail(left)) > 0) {
+        if (avail > 1024) avail = 1024;
+        int n = blip_read_samples(left, l, avail, 0);
+        blip_read_samples(right, r, n, 0);
+        for (int i = 0; i < n; ++i) { lr[2 * i] = l[i]; lr[2 * i + 1] = r[i]; }
+        fwrite(lr, sizeof(short), 2 * n, wav_file);
+        wav_samples += n;
+    }
+}
+
 static void run(uint32_t keys, int frames) {
     core->setKeys(core, keys);
     for (int i = 0; i < frames; ++i) {
         core->runFrame(core);
+        drain_audio();
         ++frame_no;
     }
 }
@@ -103,9 +125,12 @@ int main(int argc, char** argv) {
     const char* script = argv[2];
     const char* outdir = argv[3];
     const char* sav = NULL;
+    const char* wav = NULL;
     for (int i = 4; i < argc - 1; ++i) {
         if (strcmp(argv[i], "--sav") == 0) {
             sav = argv[i + 1];
+        } else if (strcmp(argv[i], "--wav") == 0) {
+            wav = argv[i + 1];
         }
     }
 
@@ -126,6 +151,15 @@ int main(int argc, char** argv) {
         return 1;
     }
     core->reset(core);
+
+    if (wav) {
+        wav_file = fopen(wav, "wb");
+        unsigned char header[44] = { 0 };
+        fwrite(header, 1, 44, wav_file);
+        core->setAudioBufferSize(core, 2048);
+        blip_set_rates(core->getAudioChannel(core, 0), core->frequency(core), 32768);
+        blip_set_rates(core->getAudioChannel(core, 1), core->frequency(core), 32768);
+    }
 
     if (sav) {
         FILE* f = fopen(sav, "rb");
@@ -187,6 +221,18 @@ int main(int argc, char** argv) {
         } else {
             printf("No save data written by the game\n");
         }
+    }
+    if (wav_file) {
+        unsigned int data = (unsigned int) (wav_samples * 4), rate = 32768, brate = 32768 * 4, riff = 36 + data;
+        unsigned short fmt = 1, ch = 2, align = 4, bits = 16;
+        unsigned int fmt_len = 16;
+        fseek(wav_file, 0, SEEK_SET);
+        fwrite("RIFF", 1, 4, wav_file); fwrite(&riff, 4, 1, wav_file); fwrite("WAVEfmt ", 1, 8, wav_file);
+        fwrite(&fmt_len, 4, 1, wav_file); fwrite(&fmt, 2, 1, wav_file); fwrite(&ch, 2, 1, wav_file);
+        fwrite(&rate, 4, 1, wav_file); fwrite(&brate, 4, 1, wav_file); fwrite(&align, 2, 1, wav_file);
+        fwrite(&bits, 2, 1, wav_file); fwrite("data", 1, 4, wav_file); fwrite(&data, 4, 1, wav_file);
+        fclose(wav_file);
+        printf("Wrote %s (%ld samples)\n", wav, wav_samples);
     }
     printf("DONE: %ld frames, %d emulator errors\n", frame_no, g_errors);
     core->deinit(core);

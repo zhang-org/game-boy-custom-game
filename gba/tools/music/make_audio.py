@@ -21,8 +21,14 @@ OUT = os.path.join(ROOT, "audio")
 SR = 22050
 
 
-def write_wav(path, samples, rate=SR):
-    """samples: floats in -1..1 -> 8-bit unsigned mono WAV."""
+SFX_PEAK = 0.9  # every sound effect is scaled so its loudest moment reaches this level
+
+
+def write_wav(path, samples, rate=SR, normalize=True):
+    """samples: floats in -1..1 -> 8-bit unsigned mono WAV (normalised to SFX_PEAK)."""
+    peak = max((abs(v) for v in samples), default=0)
+    if normalize and peak > 0:
+        samples = [v * SFX_PEAK / peak for v in samples]
     data = bytes(max(0, min(255, int(round(s * 127 + 128)))) for s in samples)
     header = struct.pack("<4sI4s4sIHHIIHH4sI", b"RIFF", 36 + len(data), b"WAVE", b"fmt ", 16, 1, 1, rate, rate, 1, 8,
                          b"data", len(data))
