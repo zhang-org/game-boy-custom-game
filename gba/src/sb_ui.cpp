@@ -180,6 +180,10 @@ namespace sb
 
         int w = (widest + 7) / 8 + 4;
         int h = count * 2 + 2;
+
+        // Keep the whole box on the 30x20 tile screen.
+        x = bn::max(0, bn::min(x, 30 - w));
+        y = bn::max(0, bn::min(y, 20 - h));
         panel(x, y, w, h);
 
         bn::vector<label, 8> labels;

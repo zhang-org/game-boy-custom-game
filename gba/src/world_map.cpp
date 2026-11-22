@@ -322,6 +322,7 @@ namespace sb
                                 info_best.clear();
                                 info_hint.clear();
                                 shown_place = -2;
+                                panel_clear();
                                 bn::string<24> who_line(character_name(n->character));
                                 who_line.append(":");
                                 const char* const* line = npc_lines[n->spot % 10];
@@ -339,6 +340,7 @@ namespace sb
                         info_best.clear();
                         info_hint.clear();
                         shown_place = -2;
+                        panel_clear();
                         constexpr bn::string_view items[] = { "Change character", "High scores", "Close" };
                         int choice = menu(15, 1, items, 0, true);
 
