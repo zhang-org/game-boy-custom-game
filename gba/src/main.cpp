@@ -1,9 +1,21 @@
+// Snowberry: a collection of winter mini games starring the family.
 #include "bn_core.h"
-#include "bn_bg_palettes.h"
-#include "bn_color.h"
+
+#include "sb_core.h"
+#include "sb_games.h"
+#include "sb_save.h"
+
 int main()
 {
     bn::core::init();
-    bn::bg_palettes::set_transparent_color(bn::color(31, 0, 0));
-    while(true) { bn::core::update(); }
+    sb::save_init();
+    sb::set_player_character(sb::last_character());
+
+    sb::title_scene();
+    sb::character_select_scene(false);
+
+    while(true)
+    {
+        sb::world_map_scene();
+    }
 }
