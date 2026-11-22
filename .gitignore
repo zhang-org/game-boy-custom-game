@@ -1,0 +1,12 @@
+# Build output (rebuild with .\build.ps1)
+build/
+*.gbc
+*.sav
+
+# Compiler leftovers
+*.o
+*.lst
+*.map
+*.noi
+*.sym
+*.ihx
