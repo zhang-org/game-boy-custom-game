@@ -33,6 +33,9 @@ namespace sb
     void fade_out(int frames = 16);
     void fade_in(int frames = 16);
 
+    // True after fade_out() until the next fade_in().
+    bool is_faded();
+
     // Frames since boot.
     int frame_count();
 

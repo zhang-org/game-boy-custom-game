@@ -116,10 +116,7 @@ namespace sb
         int selected = player_character();
         int shown = -1;
 
-        if(! from_map)
-        {
-            fade_in();
-        }
+        fade_in();
 
         for(int t = 0; ; ++t)
         {

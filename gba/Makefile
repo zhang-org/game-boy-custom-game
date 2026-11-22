@@ -5,7 +5,7 @@
 TARGET      	:=  snowberry
 BUILD       	:=  build
 LIBBUTANO   	:=  butano/butano
-PYTHON      	:=  python3
+PYTHON      	?=  python3
 SOURCES     	:=  src src/games
 INCLUDES    	:=  include
 DATA        	:=

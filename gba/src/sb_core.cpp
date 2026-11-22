@@ -18,6 +18,7 @@ namespace sb
         int g_frames = 0;
         int g_player = 0;
         int g_toast_timer = 0;
+        bool g_faded = false;
         label g_toast;
 
         void set_fade(bn::fixed intensity)
@@ -76,15 +77,24 @@ namespace sb
             set_fade(bn::fixed(i) / frames);
             update();
         }
+
+        g_faded = true;
     }
 
     void fade_in(int frames)
     {
+        g_faded = false;
+
         for(int i = frames - 1; i >= 0; --i)
         {
             set_fade(bn::fixed(i) / frames);
             update();
         }
+    }
+
+    bool is_faded()
+    {
+        return g_faded;
     }
 
     int frame_count()

@@ -269,6 +269,11 @@ namespace sb
         constexpr int x = 2, y = 1, w = 26, h = 18;
         panel(x, y, w, h);
 
+        if(is_faded())
+        {
+            fade_in();
+        }
+
         label title, place, best, start;
         bn::vector<label, 4> lines;
         title.set(0, text_y(y + 1), info.title, text_color::BLUE, align::CENTER);
