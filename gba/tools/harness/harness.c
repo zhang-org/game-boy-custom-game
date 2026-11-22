@@ -150,6 +150,14 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Can't load ROM %s\n", rom);
         return 1;
     }
+    if (sav) {
+        // Same as the real emulator: the .sav file is attached before the game starts.
+        struct VFile* save_vf = VFileOpen(sav, O_CREAT | O_RDWR);
+        if (!save_vf || !core->loadSave(core, save_vf)) {
+            fprintf(stderr, "Can't open save %s\n", sav);
+            return 1;
+        }
+    }
     core->reset(core);
 
     if (wav) {
@@ -159,17 +167,6 @@ int main(int argc, char** argv) {
         core->setAudioBufferSize(core, 2048);
         blip_set_rates(core->getAudioChannel(core, 0), core->frequency(core), 32768);
         blip_set_rates(core->getAudioChannel(core, 1), core->frequency(core), 32768);
-    }
-
-    if (sav) {
-        FILE* f = fopen(sav, "rb");
-        if (f) {
-            static unsigned char buf[0x20000];
-            size_t n = fread(buf, 1, sizeof(buf), f);
-            fclose(f);
-            core->savedataRestore(core, buf, n, true);
-            printf("Loaded save %s (%zu bytes)\n", sav, n);
-        }
     }
 
     FILE* sf = fopen(script, "r");
@@ -209,19 +206,6 @@ int main(int argc, char** argv) {
     }
     fclose(sf);
 
-    if (sav) {
-        void* data = NULL;
-        size_t size = core->savedataClone(core, &data);
-        if (size && data) {
-            FILE* f = fopen(sav, "wb");
-            fwrite(data, 1, size, f);
-            fclose(f);
-            free(data);
-            printf("Wrote save %s (%zu bytes)\n", sav, size);
-        } else {
-            printf("No save data written by the game\n");
-        }
-    }
     if (wav_file) {
         unsigned int data = (unsigned int) (wav_samples * 4), rate = 32768, brate = 32768 * 4, riff = 36 + data;
         unsigned short fmt = 1, ch = 2, align = 4, bits = 16;
