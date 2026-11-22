@@ -3,7 +3,7 @@
 Date: 2026-11-21 · Status: accepted
 
 ## Decision
-- Every change reaches `main` through a PR from a personal branch (`adam/...`, `charlie/...`). Hooks block commits and pushes to `main`.
+- Every change reaches `main` through a PR from a personal branch (`adam/...`, `charly/...`). Hooks block commits and pushes to `main`.
 - Open PRs, drafts included, are claims on the files they change. Open a draft PR early.
 - Messages between agents go through GitHub: PR descriptions (the "Notes for the other agent" section), PR comments, and `Heads-up:` issues. Lasting decisions go in this folder, one file per decision. There's no shared notes file, so nothing conflicts.
 - Either brother can merge any PR, including their own. Agents merge only when their human says so, using squash and delete branch.

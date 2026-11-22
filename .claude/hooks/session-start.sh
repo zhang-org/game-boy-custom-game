@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs at the start of every Claude session. What it prints is given to the agent as context.
-# It only fetches. It never changes the working tree.
+# It fetches, and fast-forwards main if you're on main with no uncommitted changes. It never changes a feature branch's files.
 cd "${CLAUDE_PROJECT_DIR:-.}" || exit 0
 
 git fetch --quiet --prune origin 2>/dev/null || echo "(git fetch failed: offline? The report below may be out of date.)"
@@ -16,6 +16,8 @@ if [ -n "$branch" ] && git rev-parse --verify --quiet origin/main >/dev/null; th
     git log --oneline --no-decorate HEAD..origin/main | head -15
   fi
 fi
+. "$(dirname "$0")/update-main.sh"
+update_local_main
 dirty=$(git status --porcelain | head -10)
 [ -n "$dirty" ] && { echo "Uncommitted changes:"; echo "$dirty"; }
 

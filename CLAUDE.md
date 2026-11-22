@@ -1,11 +1,11 @@
 # Game Boy mini games: rules for Claude agents
 
-Two brothers, Adam and Charlie, work on this repo, each with their own Claude Code agent, on separate computers and GitHub accounts:
+Two brothers, Adam and Charly, work on this repo, each with their own Claude Code agent, on separate computers and GitHub accounts:
 
 | Human | GitHub | Computer | Branch prefix |
 |---|---|---|---|
 | Adam | `adamzhang06` | Mac | `adam/` |
-| Charlie | `Babelfisher-txz` | Windows | `charlie/` |
+| Charly | `Babelfisher-txz` | Windows | `charly/` |
 
 You are one of those agents. The other agent can't see your conversation. It only sees what reaches GitHub: commits, PRs, PR comments and issues. Everything in this file exists so the two of you never overwrite each other's work and always know what the other one is doing.
 
@@ -13,7 +13,7 @@ What we're making: a collection of Game Boy Color mini games starring real famil
 
 ## 1. Before you start any new task
 
-A hook prints a sync report at the start of every session and tells you whenever `main` has moved. Act on it:
+Staying up to date is your job, not your human's. **Never ask them to `git pull`.** Hooks run on every session start and every prompt. They fetch, fast-forward local `main` whenever that's safe, and print a report whenever `main` has moved. Act on it:
 
 1. **Find out who you're working for.** Run `gh api user --jq .login` and use the table above. Use that person's branch prefix, and refer to the other one by name.
 2. **Read what changed.** If `main` has new commits, skim them (`git log --oneline HEAD..origin/main`). Also read any new files in [docs/decisions/](docs/decisions/).
@@ -22,9 +22,9 @@ A hook prints a sync report at the start of every session and tells you whenever
    ```
    git fetch origin && git switch -c <prefix>/<short-name> origin/main
    ```
-   If you're continuing your own branch, update it first: `git rebase origin/main`.
+   If you're continuing your own branch, rebase it yourself, without asking: `git rebase origin/main`. Commit or stash your changes first. Stop and ask only if the rebase has conflicts.
 
-Never auto-pull in the middle of a task. Fetching is fine. Your working files only change when you rebase between steps.
+Never rebase in the middle of a step. Fetching is always fine.
 
 ## 2. While working
 
