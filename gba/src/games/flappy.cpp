@@ -245,6 +245,9 @@ namespace
         }
     }
 
+    // The city that came right after St. Louis last time (so the next game starts differently).
+    int g_last_second_city = -1;
+
     // The order of the tour: St. Louis, then the others shuffled.
     struct tour_order
     {
@@ -253,19 +256,35 @@ namespace
 
         void shuffle()
         {
-            for(int i = 0; i < CITY_COUNT; ++i)
+            // Stir the random numbers with the frame count (your timing), then shuffle. Never start two
+            // tours in a row with the same second city, so it feels random.
+            for(int k = sb::frame_count() % 13; k > 0; --k)
             {
-                cities[i] = i;
+                sb::rng().update();
             }
 
-            for(int i = CITY_COUNT - 1; i > 1; --i)
+            for(int attempt = 0; attempt < 8; ++attempt)
             {
-                int j = sb::rand_range(1, i);
-                int t = cities[i];
-                cities[i] = cities[j];
-                cities[j] = t;
+                for(int i = 0; i < CITY_COUNT; ++i)
+                {
+                    cities[i] = i;
+                }
+
+                for(int i = CITY_COUNT - 1; i > 1; --i)
+                {
+                    int j = sb::rand_range(1, i);
+                    int t = cities[i];
+                    cities[i] = cities[j];
+                    cities[j] = t;
+                }
+
+                if(cities[1] != g_last_second_city)
+                {
+                    break;
+                }
             }
 
+            g_last_second_city = cities[1];
             pos = 0;
         }
 
@@ -441,7 +460,8 @@ void sb::flappy_run()
         }
 
         // Every round starts in St. Louis, with the Arch in view.
-        tour.shuffle();
+        tour.pos = 0;           // St. Louis now; the rest of the order is picked at the first flap
+        tour.cities[0] = 0;
         city_fade = 0;
         town.set_item(city_item(0));
         town.set_blending_enabled(false);
@@ -499,6 +519,7 @@ void sb::flappy_run()
             if(bn::keypad::a_pressed() || bn::keypad::up_pressed())
             {
                 state.y += bob;
+                tour.shuffle();         // decided now, at the moment of your first flap
                 break;
             }
         }
