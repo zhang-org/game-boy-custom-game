@@ -1139,7 +1139,7 @@ namespace
 
         void popup(const bn::string_view& text, sb::text_color color)
         {
-            _popup.set(0, -64, text, color, sb::align::CENTER);
+            _popup.set(0, -24, text, color, sb::align::CENTER);    // just below the sled (it rides at SLED_DRAW_Y)
             _popup_timer = 50;
         }
 
