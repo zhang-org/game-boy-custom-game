@@ -52,6 +52,18 @@ namespace sb
 
         resource_peaks g_peaks;
         int g_steady_frames = 0;
+        int g_scene_start = 0;
+
+        // Called when a scene fades out: one summary line for the scene, then start counting again.
+        void log_scene_end()
+        {
+            BN_LOG("SCENE f", g_scene_start, "-", g_frames, ": sprites ", g_peaks.sprites, "/128 palettes ",
+                   (g_peaks.palette_colors + 15) / 16, "/16 sprite_tiles ", g_peaks.sprite_tiles, "/1024 affine ",
+                   g_peaks.affine_mats, "/32 bg_tiles ", g_peaks.bg_tiles, "/2048 cpu ", g_peaks.cpu);
+            g_peaks = resource_peaks();
+            g_steady_frames = 0;
+            g_scene_start = g_frames;
+        }
 
         void log_resources()
         {
@@ -147,6 +159,10 @@ namespace sb
         }
 
         g_faded = true;
+
+#ifdef SB_RESOURCE_LOG
+        log_scene_end();
+#endif
     }
 
     void fade_in(int frames)
