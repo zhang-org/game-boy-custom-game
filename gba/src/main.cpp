@@ -4,12 +4,16 @@
 #include "sb_core.h"
 #include "sb_games.h"
 #include "sb_save.h"
+#include "sb_ui.h"
 
 int main()
 {
     bn::core::init();
     sb::save_init();
     sb::set_player_character(sb::last_character());
+
+    // The text box layer goes first, at the start of BG memory, so it never splits the space the scenes need.
+    sb::ui_init();
 
 #ifdef SB_TEST_GAME
     // Test builds only (make USERFLAGS=-DSB_TEST_GAME=2): skip the opening, character select and map and

@@ -8,7 +8,9 @@
 
 namespace sb
 {
-    // Creates the UI layer if needed. Called automatically by the functions below.
+    // Creates the UI layer if needed. Called automatically by the functions below, and once at boot (main.cpp)
+    // so the layer sits at the very start of BG VRAM and never splits the free space: created later, it landed
+    // in the middle and the town map's top layer (10 blocks in one piece) no longer fit after a game.
     void ui_init();
 
     // Draws a box in tile units (8x8 px; the screen is 30x20 tiles, (0, 0) is the top-left tile).
@@ -18,7 +20,8 @@ namespace sb
     void panel_clear();
 
     // Hides the UI layer (and frees its background) until the next panel() call.
-    // Call before leaving a scene if you need all 4 background layers.
+    // Call before leaving a scene if you need all 4 background layers, and call ui_init() again right after
+    // that scene ends, before any other background is created (see ui_init()).
     void ui_release();
 
     // Shows a vertical menu inside a box and waits for a choice. Returns the chosen index,
