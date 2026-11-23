@@ -14,6 +14,7 @@ namespace sb
         GAME_CATCH,       // Gift Tower (was Gift Catch): stack presents, deliver them to the sleigh
         GAME_FISHING,     // Ice Fishing: cast, wait, reel
         GAME_HORSE,       // Pony Gallop: jump the fences
+        GAME_SNOWBALL,    // Snowball Fight: defend the snow fort against the family
         GAME_COUNT
     };
 
@@ -37,11 +38,13 @@ namespace sb
     void catch_run();
     void fishing_run();
     void horse_run();
+    void snowball_run();
 
     // Each game's best record as text (game_info::best_text), defined in the game's own file.
     bn::string<40> catch_best_text(bool compact);
     bn::string<40> fishing_best_text(bool compact);
     bn::string<40> horse_best_text(bool compact);
+    bn::string<40> snowball_best_text(bool compact);
 
     // Ping Pong results (src/games/pingpong.cpp). A result is saved as one number that sorts correctly
     // (any win beats any loss, then the bigger margin); these turn it back into text like "5-2".
