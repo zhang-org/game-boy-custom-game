@@ -593,23 +593,45 @@ def make_burst():
 
 
 def make_serve_bar():
-    """Vertical serve timing bar, 8x32 (one frame)."""
+    """The serve bar is 64 px tall, made of two 8x32 pieces: frame 0 = bottom half, frame 1 = top half."""
     out_, back = METER_PALETTE[0], METER_PALETTE[1]
-    c = Canvas(8, 32)
-    c.rect(1, 0, 6, 32, out_)
-    c.rect(2, 1, 4, 30, back)
+    c = Canvas(8, 64)
+    for f in range(2):
+        y0 = f * 32
+        c.rect(1, y0, 6, 32, out_)
+        c.rect(2, y0 + (0 if f == 0 else 1), 4, 31, back)
+    return c
+
+
+# Serve zones per difficulty (pixels from the perfect line): perfect, strong, ok. Keep in sync with
+# serve_perfect / serve_strong / serve_ok in LEVELS (pingpong.cpp).
+SERVE_ZONES = [(2, 6, 10), (1, 5, 9), (1, 3, 7)]
+
+
+def make_serve_zones():
+    """8x32 frames (Easy, Medium, Hard): the coloured target around the perfect line in the middle (row 16):
+    white line = perfect, green = strong, gold = ok, red = weak."""
+    out_, back, green, gold, red, white = METER_PALETTE[:6]
+    c = Canvas(8, 96)
+    for f, (perfect, strong, ok) in enumerate(SERVE_ZONES):
+        y0 = f * 32
+        for d in range(0, 16):
+            col = white if d < perfect else green if d <= strong else gold if d <= ok else red if d <= ok + 3 else None
+            if col is None:
+                continue
+            for y in (y0 + 16 - d, y0 + 15 + d):
+                if 0 <= y - y0 < 32:
+                    c.rect(2, y, 4, 1, col)
+        c.rect(0, y0 + 15, 8, 2, white)                 # the perfect line sticks out of the bar
     return c
 
 
 def make_serve_marks():
-    """8x8 frames: 0 the moving marker, 1..3 the gold target zone (4, 6 and 8 px tall)."""
-    out_, back, green, gold, red, white = METER_PALETTE[:6]
-    c = Canvas(8, 32)
+    """8x8: the marker that climbs the bar."""
+    white = METER_PALETTE[5]
+    c = Canvas(8, 8)
     c.rect(0, 3, 8, 2, white)
     c.set(0, 2, white); c.set(0, 5, white); c.set(7, 2, white); c.set(7, 5, white)
-    for i, hgt in enumerate((4, 6, 8)):
-        y0 = (i + 1) * 8 + (8 - hgt) // 2
-        c.rect(2, y0, 4, hgt, gold)
     return c
 
 
@@ -651,6 +673,7 @@ def main():
     save_sprite("pingpong_meter", make_meter(), 8, METER_PALETTE)
     save_sprite("pingpong_burst", make_burst(), 16, METER_PALETTE)
     save_sprite("pingpong_vbar", make_serve_bar(), 32, METER_PALETTE)
+    save_sprite("pingpong_vzone", make_serve_zones(), 32, METER_PALETTE)
     save_sprite("pingpong_vmark", make_serve_marks(), 8, METER_PALETTE)
     print("hall: %d colours, %d unique tiles" % (len(hall.colors()), count_tiles(hall)))
     print("table: %d colours, %d unique tiles" % (len(table.colors()), count_tiles(table)))

@@ -51,6 +51,7 @@
 #include "bn_sprite_items_pingpong_shadow.h"
 #include "bn_sprite_items_pingpong_vbar.h"
 #include "bn_sprite_items_pingpong_vmark.h"
+#include "bn_sprite_items_pingpong_vzone.h"
 
 #include "sb_audio.h"
 #include "sb_characters.h"
@@ -137,22 +138,25 @@ namespace
     constexpr int CHARGE_POWER = 20;
     constexpr int PERFECT_POWER = 26;           // extra difficulty for the CPU on a PERFECT shot
 
-    // ---- Serves: HOLD A (fast serve) or B (spin serve). A marker runs up and down a bar next to you;
-    // LET GO when it is on the gold zone (which moves every serve). Speed and zone size: see LEVELS.
+    // ---- Serves: HOLD A (fast serve) or B (spin serve). A marker climbs a bar next to you; LET GO on the
+    // white line for a perfect serve (green = strong, gold = ok, the rest = weak). The target sits somewhere
+    // new every serve. If the marker reaches the top, the serve is cancelled: press again.
+    // Speed and zone sizes: see LEVELS.
     constexpr bn::fixed TOSS_SPEED = 1.3;       // how fast the ball goes up when tossed (after you let go)
-    constexpr int SERVE_TRACK = 26;             // the marker travels this many pixels
-    constexpr int SERVE_GOOD_EXTRA = 5;         // this many pixels outside the gold zone still counts as a good serve
+    constexpr int SERVE_TRACK = 58;             // the marker climbs this many pixels
+    constexpr int SERVE_TARGET_MIN = 26;        // the perfect line is somewhere between here ...
+    constexpr int SERVE_TARGET_MAX = 50;        // ... and here (pixels up the bar)
     constexpr int SERVE_OWN_BOUNCE_Z = 20;      // the serve first bounces this far from the net on the server's side
     constexpr int SERVE_FIRST_FRAMES = 12;      // flight time from the paddle to that first bounce
     constexpr int SERVE_AIM_X = 30;
-    // Fast serve (A): flight frames after the first bounce, and CPU power. [weak, good, perfect]
-    constexpr int SERVE_FAST_FRAMES[3] = { 46, 36, 28 };
-    constexpr int SERVE_FAST_POWER[3] = { 12, 28, 46 };
+    // Fast serve (A): flight frames after the first bounce, and CPU power. [weak, ok, strong, perfect]
+    constexpr int SERVE_FAST_FRAMES[4] = { 46, 40, 34, 28 };
+    constexpr int SERVE_FAST_POWER[4] = { 10, 20, 32, 46 };
     constexpr int SERVE_FAST_DEPTH = -26;
-    // Spin serve (B): slower, but curves and kicks sideways after it bounces. [weak, good, perfect]
-    constexpr int SERVE_SPIN_FRAMES[3] = { 58, 52, 46 };
-    constexpr bn::fixed SERVE_SPIN_AMOUNT[3] = { 0.008, 0.02, 0.03 };   // sideways push per frame
-    constexpr int SERVE_SPIN_POWER[3] = { 10, 30, 48 };
+    // Spin serve (B): slower, but curves and kicks sideways after it bounces. [weak, ok, strong, perfect]
+    constexpr int SERVE_SPIN_FRAMES[4] = { 58, 55, 50, 46 };
+    constexpr bn::fixed SERVE_SPIN_AMOUNT[4] = { 0.008, 0.015, 0.022, 0.03 };   // sideways push per frame
+    constexpr int SERVE_SPIN_POWER[4] = { 8, 18, 32, 48 };
     constexpr int SERVE_SPIN_DEPTH = -18;
 
     // ---- CPU: three difficulty levels
@@ -174,17 +178,19 @@ namespace
         int charge_frames;          // frames to fill your smash meter (Hard fills faster ...)
         bn::fixed sweet_front;      // ... but a PERFECT needs the ball between this far in front of you
         bn::fixed sweet_back;       //     and this far behind you when you let go
-        bn::fixed serve_speed;      // serve bar: marker speed (pixels per frame)
-        int serve_zone;             // serve bar: gold zone size, 1 = 4 px, 2 = 6 px, 3 = 8 px
+        bn::fixed serve_speed;      // serve bar: how fast the marker climbs (pixels per frame)
+        int serve_perfect;          // serve bar: within this many pixels of the line = PERFECT ...
+        int serve_strong;           // ... this many = strong (green) ...
+        int serve_ok;               // ... this many = ok (gold); further = weak. (Art: SERVE_ZONES in make_pingpong.py)
         int perfect_serve_floater;  // % chance that a PERFECT serve comes back as a slow floater
-        int good_serve_floater;     // ... and a good serve
+        int good_serve_floater;     // ... and a strong serve
     };
 
     constexpr cpu_level LEVELS[3] = {
-        //  name      speed react attack weak range miss tell normal attack serve spin% | charge front back  bar  zone perf good
-        { "Easy",   0.95, 12,   14,    50,  26,   82,  30,  58,    46,    58,   0,    30,    10,   3,    1.0, 3,   100, 40 },
-        { "Medium", 1.1,  10,   20,    62,  26,   92,  22,  52,    40,    52,   20,   24,    8,    2,    1.4, 2,   100, 30 },
-        { "Hard",   1.3,  8,    28,    72,  24,   102, 16,  46,    34,    44,   45,   17,    6,    1,    1.9, 1,   85,  20 },
+        //  name      speed react attack weak range miss tell normal attack serve spin% | charge front back  bar   perf str ok | float strong
+        { "Easy",   0.95, 12,   14,    50,  26,   82,  30,  58,    46,    58,   0,    30,    10,   3,    0.6,  2,   6,  10,  100, 40 },
+        { "Medium", 1.1,  10,   20,    62,  26,   92,  22,  52,    40,    52,   20,   24,    8,    2,    0.8,  1,   5,  9,   100, 30 },
+        { "Hard",   1.3,  8,    28,    72,  24,   102, 16,  46,    34,    44,   45,   24,    6,    1,    1.05, 1,   3,  7,   85,  20 },
     };
 
     constexpr int CPU_RUN_WEIGHT = 60;          // difficulty = power + run * this, run = 1 when it only just makes it
@@ -245,7 +251,7 @@ namespace
 
     enum class state { SERVE, TOSS, RALLY, POINT, DONE };
 
-    enum serve_quality { SERVE_WEAK = 0, SERVE_GOOD = 1, SERVE_PERFECT = 2 };
+    enum serve_quality { SERVE_WEAK = 0, SERVE_OK = 1, SERVE_GOOD = 2, SERVE_PERFECT = 3 };
 
     struct ball_state
     {
@@ -594,7 +600,8 @@ namespace
         bn::sprite_ptr meter = bn::sprite_items::pingpong_meter.create_sprite(0, 0, 0);
         bn::sprite_ptr burst = bn::sprite_items::pingpong_burst.create_sprite(0, 0, 0);
         bn::sprite_ptr serve_bar = bn::sprite_items::pingpong_vbar.create_sprite(0, 0, 0);
-        bn::sprite_ptr serve_zone = bn::sprite_items::pingpong_vmark.create_sprite(0, 0, 1);
+        bn::sprite_ptr serve_bar_top = bn::sprite_items::pingpong_vbar.create_sprite(0, 0, 1);
+        bn::sprite_ptr serve_zone = bn::sprite_items::pingpong_vzone.create_sprite(0, 0, 0);
         bn::sprite_ptr serve_marker = bn::sprite_items::pingpong_vmark.create_sprite(0, 0, 0);
         sb::label my_score_label, cpu_score_label;
         bn::vector<bn::sprite_ptr, TRAIL_LENGTH> trail;
@@ -634,10 +641,10 @@ namespace
         int serve_quality_of_last = 1;
         // the serve timing bar
         bool serve_aiming = false;
+        bool serve_wait_release = false;// after a cancelled serve: let go of the buttons first
         int serve_button = 0;           // 1 = A, 2 = B
         bn::fixed serve_mark = 0;       // 0..SERVE_TRACK, from the bottom of the bar
-        bn::fixed serve_mark_speed = 1;
-        int serve_zone_pos = 13;        // centre of the gold zone, 0..SERVE_TRACK
+        int serve_zone_pos = 40;        // height of the perfect line, SERVE_TARGET_MIN..MAX
 
         // ---- charging a smash
         bool charging = false;
@@ -670,8 +677,11 @@ namespace
             burst.set_visible(false);
 
             serve_bar.set_bg_priority(1);
+            serve_bar_top.set_bg_priority(1);
             serve_zone.set_bg_priority(1);
             serve_marker.set_bg_priority(1);
+            serve_bar_top.set_visible(false);
+            serve_bar_top.set_z_order(-3);
             serve_bar.set_visible(false);
             serve_zone.set_visible(false);
             serve_marker.set_visible(false);
@@ -785,6 +795,7 @@ namespace
             bounces = 0;
             serve_bounce_pending = false;
             hide_serve_bar();
+            serve_wait_release = false;
             stop_charging();
             me->cheering = false;
             cpu->cheering = false;
@@ -1061,6 +1072,11 @@ namespace
             {
                 sb::sfx(bn::sound_items::sfx_smash);
                 show_message(fast ? "Perfect serve!" : "Perfect spin!", sb::text_color::YELLOW, 40);
+            }
+            else if(quality == SERVE_GOOD)
+            {
+                sb::sfx(bn::sound_items::sfx_paddle);
+                show_message("Strong serve!", sb::text_color::WHITE, 30);
             }
             else
             {
@@ -1570,61 +1586,69 @@ namespace
             }
         }
 
-        // ---- the serve timing bar (hold A or B, let go on the gold zone)
+        // ---- the serve bar (hold A or B; the marker climbs; let go on the white line)
         void hide_serve_bar()
         {
             serve_aiming = false;
             serve_bar.set_visible(false);
+            serve_bar_top.set_visible(false);
             serve_zone.set_visible(false);
             serve_marker.set_visible(false);
         }
 
         void update_serve_bar()
         {
+            if(serve_wait_release)
+            {
+                if(! bn::keypad::a_held() && ! bn::keypad::b_held())
+                {
+                    serve_wait_release = false;
+                }
+
+                return;
+            }
+
             if(! serve_aiming)
             {
                 bool a = bn::keypad::a_pressed();
                 bool b = bn::keypad::b_pressed();
 
-                if(a || b)
-                {
-                    serve_aiming = true;
-                    serve_button = a ? 1 : 2;
-                    toss_kind = a ? SHOT_SERVE_FAST : SHOT_SERVE_SPIN;
-                    serve_mark = 0;
-                    serve_mark_speed = level->serve_speed;
-                    // The gold zone is somewhere new every serve.
-                    serve_zone_pos = sb::rand_range(5, SERVE_TRACK - 5);
-                    hint_label.set(-116, 70, "Let go on the gold!", sb::text_color::WHITE);
-                }
-                else
+                if(! a && ! b)
                 {
                     return;
                 }
+
+                serve_aiming = true;
+                serve_button = a ? 1 : 2;
+                toss_kind = a ? SHOT_SERVE_FAST : SHOT_SERVE_SPIN;
+                serve_mark = 0;
+                serve_zone_pos = sb::rand_range(SERVE_TARGET_MIN, SERVE_TARGET_MAX);
+                hint_label.set(-116, 70, "Let go on the white line!", sb::text_color::WHITE);
             }
 
-            // The marker runs up and down the bar.
-            serve_mark += serve_mark_speed;
+            // The marker only climbs. At the top the serve is cancelled.
+            serve_mark += level->serve_speed;
 
             if(serve_mark >= SERVE_TRACK)
             {
-                serve_mark = SERVE_TRACK;
-                serve_mark_speed = -serve_mark_speed;
-            }
-            else if(serve_mark <= 0)
-            {
-                serve_mark = 0;
-                serve_mark_speed = -serve_mark_speed;
+                hide_serve_bar();
+                serve_wait_release = true;
+                sb::sfx(bn::sound_items::sfx_bump);
+                show_message("Too slow! Try again", sb::text_color::WHITE, 50);
+                hint_label.set(-116, 70, "Hold A: fast  Hold B: spin", sb::text_color::WHITE);
+                return;
             }
 
-            // Next to you, on the side away from the ball hand.
+            // Next to you, on your left.
             int bx = (me->x - 20).round_integer();
-            int bottom = me->center_y() + 13;
-            serve_bar.set_position(bx, bottom - 16 + 1);
-            serve_zone.set_tiles(bn::sprite_items::pingpong_vmark.tiles_item(), level->serve_zone);
+            int bottom = me->center_y() + 14;          // screen y of the bar's bottom end
+            serve_bar.set_position(bx, bottom - 16);
+            serve_bar_top.set_position(bx, bottom - 48);
+            serve_zone.set_tiles(bn::sprite_items::pingpong_vzone.tiles_item(), g_level_choice);
             serve_zone.set_position(bx, bottom - 2 - serve_zone_pos);
             serve_marker.set_position(bx, (bottom - 2 - serve_mark).round_integer());
             serve_bar.set_visible(true);
+            serve_bar_top.set_visible(true);
             serve_zone.set_visible(true);
             serve_marker.set_visible(true);
 
@@ -1632,11 +1656,11 @@ namespace
 
             if(! held)
             {
-                // Let go: how close was the marker to the middle of the gold zone?
-                int zone_half = level->serve_zone + 1;          // 2, 3 or 4 pixels
+                // Let go: how close was the marker to the line?
                 int miss = bn::abs((serve_mark - serve_zone_pos).round_integer());
-                serve_quality_of_last = miss <= zone_half ? SERVE_PERFECT :
-                                        miss <= zone_half + SERVE_GOOD_EXTRA ? SERVE_GOOD : SERVE_WEAK;
+                serve_quality_of_last = miss <= level->serve_perfect ? SERVE_PERFECT :
+                                        miss <= level->serve_strong ? SERVE_GOOD :
+                                        miss <= level->serve_ok ? SERVE_OK : SERVE_WEAK;
                 hide_serve_bar();
                 hint_label.clear();
                 ball.vh = TOSS_SPEED;
