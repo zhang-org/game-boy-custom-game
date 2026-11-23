@@ -605,7 +605,7 @@ def make_serve_bar():
 
 # Serve zones per difficulty (pixels from the middle of the target): perfect, strong, ok. Keep in sync
 # with serve_perfect / serve_strong / serve_ok in LEVELS (pingpong.cpp).
-SERVE_ZONES = [(3, 7, 11), (2, 6, 10), (2, 4, 8)]
+SERVE_ZONES = [(2, 8, 14), (1, 7, 12), (1, 5, 10)]
 
 
 def make_serve_zones():
@@ -626,6 +626,28 @@ def make_serve_zones():
         c.rect(1, y0 + 16 - perfect, 6, 2 * perfect + 1, red)
         for y in (y0 + 16 - perfect - 1, y0 + 16 + perfect + 1):
             c.rect(1, y, 6, 1, white)
+    return c
+
+
+def make_whoosh():
+    """Air streaks around a PERFECT swing: 32x16, 2 frames (strong, fading)."""
+    white, pink = METER_PALETTE[5], METER_PALETTE[6]
+    c = Canvas(32, 32)
+    for f in range(2):
+        y0 = f * 16
+        col = white if f == 0 else pink
+        for k, (r, start, end) in enumerate(((13, 0.15, 0.85), (10, 0.25, 0.8), (7, 0.35, 0.75))):
+            if f == 1 and k == 0:
+                continue
+            import math
+            steps = 40
+            for i in range(steps):
+                t = start + (end - start) * i / steps
+                ang = math.pi * (1.0 + t)            # an arc over the top
+                x = int(round(16 + r * 1.2 * math.cos(ang)))
+                y = int(round(y0 + 14 + r * 0.9 * math.sin(ang)))
+                if (i + k) % 7 != 0:                  # little gaps make it look fast
+                    c.set(x, y, col)
     return c
 
 
@@ -670,14 +692,21 @@ def main():
         "pingpong_flake": (make_flake(), 8),
         "pingpong_light": (make_light(), 8),
     }
+    shared = []
+    for canvas, _ in sprites.values():
+        for col in canvas.colors():
+            if col not in shared:
+                shared.append(col)
+    assert len(shared) <= 15, f"the small ping pong sprites use {len(shared)} colours; they must share 15"
     for name, (canvas, h) in sprites.items():
-        save_sprite(name, canvas, h)
+        save_sprite(name, canvas, h, shared)
     # The meter and the burst share one palette, so together they use one of the 16 sprite palettes.
     save_sprite("pingpong_meter", make_meter(), 8, METER_PALETTE)
     save_sprite("pingpong_burst", make_burst(), 16, METER_PALETTE)
     save_sprite("pingpong_vbar", make_serve_bar(), 32, METER_PALETTE)
     save_sprite("pingpong_vzone", make_serve_zones(), 32, METER_PALETTE)
     save_sprite("pingpong_vmark", make_serve_marks(), 8, METER_PALETTE)
+    save_sprite("pingpong_whoosh", make_whoosh(), 16, METER_PALETTE)
     print("hall: %d colours, %d unique tiles" % (len(hall.colors()), count_tiles(hall)))
     print("table: %d colours, %d unique tiles" % (len(table.colors()), count_tiles(table)))
 

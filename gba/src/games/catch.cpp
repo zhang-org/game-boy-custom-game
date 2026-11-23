@@ -804,11 +804,19 @@ namespace
 
 void sb::catch_run()
 {
-    constexpr bn::string_view howto[] = {
-        "Catch the falling gifts!",
-        "< > Walk   Hold A: Run",
+    // Shown on the start screen (scroll with Up/Down) and in the pause menu. '#' = heading.
+    static constexpr bn::string_view howto[] = {
+        "#Catch",
+        "< > walk. Hold A or B",
+        "to run.",
+        "Catch the gifts Santa's",
+        "sleigh drops:",
         "Gift 10  Big 25  { 50",
+        "Catch in a row for combos!",
+        "",
+        "#Avoid",
         "Coal costs a heart @",
+        "Missing a gift is fine.",
     };
 
     bn::bg_palettes::set_transparent_color(bn::color(4, 5, 12));

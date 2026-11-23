@@ -220,11 +220,19 @@ namespace
 
 void sb::flappy_run()
 {
-    constexpr bn::string_view howto[] = {
-        "Press A to flap and fly!",
-        "Fly between the chimneys",
-        "and the icy clouds.",
-        "1 point for every gap.",
+    // Shown on the start screen (scroll with Up/Down) and in the pause menu. '#' = heading.
+    static constexpr bn::string_view howto[] = {
+        "#Fly",
+        "Press A (or Up) to flap.",
+        "Your reindeer falls when",
+        "you stop flapping.",
+        "",
+        "#Score",
+        "Fly through the gaps",
+        "between the chimneys and",
+        "the icy clouds: 1 point",
+        "for every gap.",
+        "It speeds up as you go!",
     };
 
     // ---- Scene

@@ -288,6 +288,22 @@ namespace sb
         return text;
     }
 
+    // The flags live in the last extra record (its score is a bit mask, one bit per game), so the
+    // save layout stays the same.
+    bool howto_seen(int game)
+    {
+        return (g_data.extra[extra_record_count - 1].score >> game) & 1;
+    }
+
+    void set_howto_seen(int game)
+    {
+        if(! howto_seen(game))
+        {
+            g_data.extra[extra_record_count - 1].score |= 1 << game;
+            save_write();
+        }
+    }
+
     bool music_enabled()
     {
         return g_data.music_on;

@@ -52,6 +52,17 @@
 #include "bn_sprite_items_pingpong_vbar.h"
 #include "bn_sprite_items_pingpong_vmark.h"
 #include "bn_sprite_items_pingpong_vzone.h"
+#include "bn_sprite_items_pingpong_whoosh.h"
+#include "bn_sprite_items_crowd_adam.h"
+#include "bn_sprite_items_crowd_aiden.h"
+#include "bn_sprite_items_crowd_alyssa.h"
+#include "bn_sprite_items_crowd_billy.h"
+#include "bn_sprite_items_crowd_bo.h"
+#include "bn_sprite_items_crowd_charly.h"
+#include "bn_sprite_items_crowd_cheng.h"
+#include "bn_sprite_items_crowd_cherry.h"
+#include "bn_sprite_items_crowd_ella.h"
+#include "bn_sprite_items_crowd_lillian.h"
 
 #include "sb_audio.h"
 #include "sb_characters.h"
@@ -144,7 +155,11 @@ namespace
     // Speed and zone sizes: see LEVELS.
     constexpr bn::fixed TOSS_SPEED = 1.3;       // how fast the ball goes up when tossed (after you let go)
     constexpr int SERVE_TRACK = 58;             // the marker climbs this many pixels
-    constexpr int SERVE_TOSS_HEIGHT = 30;       // the ball goes this high while the marker climbs, and falls back at the top
+    constexpr int SERVE_TOSS_HEIGHT = 30;       // the toss goes this high ...
+    constexpr int SERVE_PADDLE_HEIGHT = 4;      // ... and falls back to paddle height exactly when the marker is in the red box
+    constexpr int SERVE_SWING_FRAMES = 14;      // the serve's own swing animation (low behind, brushing up and forward)
+    constexpr int CPU_SERVE_CORNER_X = 34;      // the CPU serves from a corner of the table, like the pros
+    constexpr bn::fixed CPU_TOSS_SPEED = 1.7;   // its toss
     constexpr int SERVE_TARGET_MIN = 26;        // the perfect box is somewhere between here ...
     constexpr int SERVE_TARGET_MAX = 50;        // ... and here (pixels up the bar)
     constexpr int SERVE_OWN_BOUNCE_Z = 20;      // the serve first bounces this far from the net on the server's side
@@ -191,14 +206,19 @@ namespace
 
     constexpr cpu_level LEVELS[3] = {
         //  name      speed react attack weak range miss tell normal attack serve spin% | charge front back  bar   perf str ok | float strong | ret close
-        { "Easy",   0.95, 12,   14,    50,  26,   82,  30,  58,    46,    58,   0,    30,    10,   3,    0.6,  3,   7,  11,  100, 40,    5,  20 },
-        { "Medium", 1.1,  10,   20,    62,  26,   92,  22,  52,    40,    52,   20,   24,    6,    1,    0.8,  2,   6,  10,  100, 30,    30, 45 },
-        { "Hard",   1.3,  8,    28,    72,  24,   102, 16,  46,    34,    44,   45,   24,    6,    1,    1.05, 2,   4,  8,   85,  20,    45, 40 },
+        { "Easy",   0.95, 12,   14,    50,  26,   82,  30,  58,    46,    58,   0,    30,    10,   3,    0.6,  2,   8,  14,  100, 40,    5,  20 },
+        { "Medium", 1.1,  10,   20,    62,  26,   92,  22,  52,    40,    52,   20,   24,    6,    1,    0.8,  1,   7,  12,  100, 30,    30, 45 },
+        { "Hard",   1.3,  8,    28,    72,  24,   102, 16,  46,    34,    44,   45,   24,    6,    1,    1.05, 1,   5,  10,  85,  20,    45, 40 },
     };
 
     constexpr int CPU_RUN_WEIGHT = 60;          // difficulty = power + run * this, run = 1 when it only just makes it
     constexpr int CPU_JITTER = 8;               // small random wobble so it isn't robotic
     constexpr int CPU_SERVE_DELAY = 70;         // frames before the CPU serves
+    // After returning a hard shot the CPU is off balance: it waits this long before walking back to the
+    // middle: (power of your shot - RECOVER_FROM_POWER) x RECOVER_PERCENT / 100 frames. A PERFECT smash
+    // out wide leaves the other side open for a while.
+    constexpr int RECOVER_FROM_POWER = 30;
+    constexpr int RECOVER_PERCENT = 60;
     constexpr int CPU_WEAK_FRAMES = 74;         // its floater is slow and high
     constexpr int RALLY_SPEEDUP_MAX = 8;        // long rallies get up to this many frames faster per shot
     constexpr int RALLY_HITS_PER_SPEEDUP = 2;   // ... one frame faster every this many hits
@@ -230,17 +250,39 @@ namespace
     constexpr bn::fixed TABLE_HEIGHT = 10;      // the floor is this far below the table top
     constexpr int FEET_TO_CENTER = 14;          // character sprite centre is this far above its feet
 
-    constexpr bn::fixed PLAYER_X_LIMIT = 84;
+    constexpr bn::fixed PLAYER_X_LIMIT = 62;    // the edges of the rug (so you can't stand in front of the scoreboard)
     constexpr bn::fixed PLAYER_Z_MIN = 44;
     constexpr bn::fixed PLAYER_Z_MAX = 54;
     constexpr bn::fixed PLAYER_START_Z = 46;
-    constexpr bn::fixed CPU_X_LIMIT = 80;
+    constexpr bn::fixed CPU_X_LIMIT = 66;
     constexpr bn::fixed CPU_Z_MIN = -54;
     constexpr bn::fixed CPU_Z_MAX = -40;
     constexpr bn::fixed CPU_HOME_Z = -45;
     constexpr bn::fixed HIT_MIN_H = -7;         // balls lower than this (below the table top) can't be hit
 
     enum side { PLAYER = 0, CPU = 1 };
+
+    // ---- The spectators: everyone who isn't playing watches from the sides of the room and cheers after
+    // every point. Art: tools/art/make_crowd.py (same order as sb_characters.cpp).
+    const bn::sprite_item& crowd_sprite(int character)
+    {
+        static const bn::sprite_item* items[] = {
+            &bn::sprite_items::crowd_adam, &bn::sprite_items::crowd_charly, &bn::sprite_items::crowd_billy,
+            &bn::sprite_items::crowd_bo, &bn::sprite_items::crowd_cherry, &bn::sprite_items::crowd_lillian,
+            &bn::sprite_items::crowd_cheng, &bn::sprite_items::crowd_ella, &bn::sprite_items::crowd_aiden,
+            &bn::sprite_items::crowd_alyssa,
+        };
+        return *items[character];
+    }
+
+    enum crowd_frame { CROWD_FRONT = 0, CROWD_SIDE = 1, CROWD_CHEER = 2 };
+
+    // Where they stand (sprite centre, Butano coordinates) and which way they face (+1 right, -1 left).
+    constexpr int SPECTATOR_SPOTS[8][3] = {
+        { -104, -24, 1 }, { -86, -16, 1 }, { -104, 4, 1 }, { -86, 8, 1 },     // left wall (above the scoreboard)
+        { 86, 2, -1 }, { 104, 10, -1 }, { 86, 30, -1 }, { 104, 38, -1 },      // right side (below the tree)
+    };
+    constexpr int CHEER_FRAMES = 50;            // how long they jump after a point
 
     enum shot_kind
     {
@@ -417,6 +459,7 @@ namespace
         bn::fixed swing_x, swing_y; // screen spot the swing aims at
         bool cheering = false;
         bool serve_stance = false;  // sideways and bent over, getting ready to serve
+        int serve_swing = 0;        // counts down during the serve's own swing
         bool facing_up;
 
         actor(int chr, bool up, bn::fixed start_x, bn::fixed start_z) :
@@ -439,6 +482,14 @@ namespace
             paddle_side = ball_x >= x ? 1 : -1;
             swing_x = ball_x;
             swing_y = ball_y_screen;
+        }
+
+        void start_serve_swing()
+        {
+            serve_swing = SERVE_SWING_FRAMES;
+            serve_stance = false;
+            swing = 0;
+            smash = 0;
         }
 
         void start_smash(bn::fixed ball_x, bn::fixed ball_y_screen)
@@ -473,10 +524,11 @@ namespace
             {
                 frame = sb::FRAME_CHEER;                // arms up, ready to slam
             }
-            else if(serve_stance)
+            else if(serve_stance || serve_swing > 0)
             {
                 frame = sb::FRAME_SIDE;                 // side-on to the table, like a real serve
-                lift = -2;                              // bent over a little
+                flip = ! facing_up;                     // (the CPU faces the other way)
+                lift = serve_stance ? -2 : 0;           // bent over a little while waiting
             }
             else if(charge_side != 0 || windup != 0)
             {
@@ -566,12 +618,43 @@ namespace
                     py = (py + swing_y) / 2 + 2;
                 }
             }
+            else if(serve_swing > 0)
+            {
+                // The serve: from low behind the body, brushing up under the ball and forward.
+                --serve_swing;
+                int t = SERVE_SWING_FRAMES - serve_swing;
+                int dir = facing_up ? 1 : -1;
+
+                if(t <= 3)
+                {
+                    pframe = 2;
+                    pside = -dir;
+                    px = x - 9 * dir;
+                    py = cy + 6;
+                }
+                else if(t <= 8)
+                {
+                    pframe = 1;
+                    pside = dir;
+                    bn::fixed f = bn::fixed(t - 3) / 5;
+                    px = x - 9 * dir + 21 * dir * f;
+                    py = cy + 6 - 10 * f;
+                }
+                else
+                {
+                    pframe = 0;
+                    pside = dir;
+                    px = x + 13 * dir;
+                    py = cy - 9;
+                }
+            }
             else if(serve_stance)
             {
                 // Paddle low and back behind the body.
+                int dir = facing_up ? 1 : -1;
                 pframe = 2;
-                pside = -1;
-                px = x - 9;
+                pside = -dir;
+                px = x - 9 * dir;
                 py = cy + 6;
             }
             else if(charge_side != 0)
@@ -620,6 +703,14 @@ namespace
         bn::sprite_ptr serve_zone = bn::sprite_items::pingpong_vzone.create_sprite(0, 0, 0);
         bn::sprite_ptr serve_marker = bn::sprite_items::pingpong_vmark.create_sprite(0, 0, 0);
         sb::label my_score_label, cpu_score_label;
+        bn::sprite_ptr whoosh = bn::sprite_items::pingpong_whoosh.create_sprite(0, 0, 0);
+        struct spectator
+        {
+            bn::sprite_ptr sprite;
+            int spot;
+        };
+        bn::vector<spectator, 8> crowd;
+        int cheer_timer = 0;
         bn::vector<bn::sprite_ptr, TRAIL_LENGTH> trail;
         bn::vector<bn::sprite_ptr, 6> flakes;
         bn::vector<bn::sprite_ptr, 8> lights;
@@ -667,9 +758,10 @@ namespace
         int charge_button = 0;      // 1 = A (forehand), 2 = B (backhand)
         int charge = 0;
         bool last_perfect = false;  // your last hit was a PERFECT smash / shot
+        int incoming_power = 0;     // how hard your last shot was (the CPU recovers slower from hard ones)
 
         // ---- effects
-        int freeze = 0, shake = 0, burst_timer = 0, trail_timer = 0;
+        int freeze = 0, shake = 0, burst_timer = 0, trail_timer = 0, whoosh_timer = 0;
         bn::fixed flash = 0;
         bn::fixed history_x[TRAIL_LENGTH * 3] = {}, history_y[TRAIL_LENGTH * 3] = {};
 
@@ -692,6 +784,9 @@ namespace
             burst.set_bg_priority(1);
             burst.set_z_order(-5);
             burst.set_visible(false);
+            whoosh.set_bg_priority(1);
+            whoosh.set_z_order(-4);
+            whoosh.set_visible(false);
 
             serve_bar.set_bg_priority(1);
             serve_bar_top.set_bg_priority(1);
@@ -764,6 +859,26 @@ namespace
             cpu->paddle.set_z_order(-2);
             cpu->paddle_side = -1;
 
+            crowd.clear();
+            int spot = 0;
+
+            for(int c = 0; c < sb::character_count && spot < 8; ++c)
+            {
+                if(c == sb::player_character() || c == opponent)
+                {
+                    continue;
+                }
+
+                const int* at = SPECTATOR_SPOTS[spot];
+                bn::sprite_ptr sprite = crowd_sprite(c).create_sprite(at[0], at[1], CROWD_SIDE);
+                sprite.set_horizontal_flip(at[2] < 0);
+                sprite.set_bg_priority(2);
+                sprite.set_z_order(-at[1] / 8);
+                crowd.push_back({ sprite, spot });
+                ++spot;
+            }
+
+            cheer_timer = 0;
             my_points = 0;
             cpu_points = 0;
             last_winner = PLAYER;
@@ -811,6 +926,7 @@ namespace
             rally_hits = 0;
             bounces = 0;
             serve_bounce_pending = false;
+            cpu->serve_stance = false;
             hide_serve_bar();
             serve_wait_release = false;
             stop_charging();
@@ -823,7 +939,7 @@ namespace
 
             if(server == CPU)
             {
-                cpu_target_x = sb::rand_range(-24, 24);
+                cpu_target_x = sb::rand_range(0, 1) ? CPU_SERVE_CORNER_X : -CPU_SERVE_CORNER_X;
                 bn::string<32> text(sb::character_name(opponent));
                 text.append(" serves");
                 show_message(text, sb::text_color::WHITE, 70);
@@ -834,7 +950,7 @@ namespace
                 cpu_target_x = 0;
                 show_message(deuce() && my_points == cpu_points ? "Deuce! Your serve" : "Your serve!",
                              sb::text_color::WHITE, 70);
-                hint_label.set(-116, 70, "Hold A: fast  Hold B: spin", sb::text_color::WHITE);
+                hint_label.set(-116, 70, "Hold A: topspin  B: backspin", sb::text_color::WHITE);
             }
 
             hold_ball_at_server();
@@ -1054,21 +1170,15 @@ namespace
             stop_charging();
             last_perfect = perfect;
             after_hit(PLAYER, high ? SHOT_SMASH : SHOT_POWER, power);
-            trail_timer = 40;
-
-            for(int i = 0; i < TRAIL_LENGTH * 3; ++i)
-            {
-                history_x[i] = hit_x;
-                history_y[i] = hit_y;
-            }
+            start_trail(hit_x, hit_y, 40);
 
             if(perfect)
             {
                 freeze = PERFECT_FREEZE_FRAMES;
                 shake = PERFECT_SHAKE_FRAMES;
                 flash = PERFECT_FLASH;
-                burst_timer = 14;
-                burst.set_position(hit_x.round_integer(), hit_y.round_integer());
+                start_burst(hit_x, hit_y);
+                start_whoosh(hit_x, hit_y - 4);
                 sb::sfx(bn::sound_items::sfx_pp_perfect);
                 show_message(high ? "PERFECT SMASH!" : "PERFECT SHOT!", sb::text_color::YELLOW, 50);
             }
@@ -1079,12 +1189,38 @@ namespace
             }
         }
 
+        void start_trail(bn::fixed x, bn::fixed y, int frames)
+        {
+            trail_timer = frames;
+
+            for(int i = 0; i < TRAIL_LENGTH * 3; ++i)
+            {
+                history_x[i] = x;
+                history_y[i] = y;
+            }
+        }
+
+        void start_burst(bn::fixed x, bn::fixed y)
+        {
+            burst_timer = 14;
+            burst.set_position(x.round_integer(), y.round_integer());
+        }
+
+        // Air streaks over a PERFECT swing, with a whoosh sound.
+        void start_whoosh(bn::fixed x, bn::fixed y)
+        {
+            whoosh_timer = 16;
+            whoosh.set_position(x.round_integer(), y.round_integer());
+            sb::sfx(bn::sound_items::sfx_whoosh);
+        }
+
         void player_serve(int quality)
         {
             int aim = aim_input();
             bool fast = toss_kind == SHOT_SERVE_FAST;
             bn::fixed tx = aim ? bn::fixed(aim * SERVE_AIM_X) : bn::fixed(sb::rand_range(-18, 18));
-            me->start_swing(ball.x, ball_screen_y());
+            me->start_serve_swing();
+            bn::fixed hit_x = ball.x, hit_y = ball_screen_y();
 
             // First the ball goes down onto your own side ...
             ball.spin = 0;
@@ -1102,7 +1238,13 @@ namespace
 
             if(quality == SERVE_PERFECT)
             {
-                sb::sfx(bn::sound_items::sfx_smash);
+                // A short pause, a ghost trail behind the ball, a star and a whoosh.
+                freeze = PERFECT_FREEZE_FRAMES - 2;
+                flash = PERFECT_FLASH / 2;
+                start_trail(hit_x, hit_y, 30);
+                start_burst(hit_x, hit_y);
+                start_whoosh(me->x + 8, me->center_y() - 6);
+                sb::sfx(bn::sound_items::sfx_pp_perfect);
                 show_message(fast ? "Perfect serve!" : "Perfect spin!", sb::text_color::YELLOW, 40);
             }
             else if(quality == SERVE_GOOD)
@@ -1124,8 +1266,11 @@ namespace
         void cpu_serve()
         {
             bool spin = sb::rand_range(0, 99) < level->spin_serve_percent;
-            bn::fixed tx = sb::rand_range(-26, 26);
-            cpu->start_swing(ball.x, ball_screen_y());
+            // From a corner, usually across the table (and sometimes straight down the line).
+            int across = cpu->x > 0 ? -1 : 1;
+            bn::fixed tx = sb::rand_range(0, 3) ? bn::fixed(across * sb::rand_range(10, 30)) :
+                                                  bn::fixed(-across * sb::rand_range(14, 28));
+            cpu->start_serve_swing();
             ball.spin = 0;
             plan_shot(ball, ball.x + (tx - ball.x) / 4, -SERVE_OWN_BOUNCE_Z, SERVE_FIRST_FRAMES);
             serve_bounce_pending = true;
@@ -1224,15 +1369,17 @@ namespace
 
             if(who == PLAYER)
             {
+                incoming_power = power;
                 think_cpu(kind, power);
             }
             else
             {
-                // Recover toward the middle.
+                // Walk back toward the middle, but after a hard shot it needs a moment first.
                 trail_timer = 0;
                 cpu_target_x = cpu->x / 3;
                 cpu_target_z = CPU_HOME_Z;
-                cpu_reaction = 0;
+                cpu_reaction = bn::max(0, incoming_power - RECOVER_FROM_POWER) * RECOVER_PERCENT / 100;
+                incoming_power = 0;
             }
         }
 
@@ -1462,6 +1609,7 @@ namespace
             }
 
             update_score_label();
+            cheer_timer = CHEER_FRAMES;
 
             if(DEBUG_LOG)
             {
@@ -1695,7 +1843,7 @@ namespace
                 serve_wait_release = true;
                 sb::sfx(bn::sound_items::sfx_bump);
                 show_message("Too slow! Try again", sb::text_color::WHITE, 50);
-                hint_label.set(-116, 70, "Hold A: fast  Hold B: spin", sb::text_color::WHITE);
+                hint_label.set(-116, 70, "Hold A: topspin  B: backspin", sb::text_color::WHITE);
                 return;
             }
 
@@ -1712,11 +1860,12 @@ namespace
             serve_zone.set_visible(true);
             serve_marker.set_visible(true);
 
-            // The ball is tossed up while the marker climbs and comes back down as it reaches the top.
-            bn::fixed f = serve_mark / SERVE_TRACK;
+            // The ball is tossed up while the marker climbs, and falls back to paddle height exactly when the
+            // marker reaches the middle of the red box (then keeps falling if you wait).
+            bn::fixed f = serve_mark / serve_zone_pos;
             ball.x = me->x + 6;
             ball.z = me->z - 3;
-            ball.h = 2 + SERVE_TOSS_HEIGHT * 4 * f * (1 - f);
+            ball.h = bn::max(bn::fixed(SERVE_PADDLE_HEIGHT) + SERVE_TOSS_HEIGHT * 4 * f * (1 - f), bn::fixed(-8));
             ball.vh = 0;
             me->serve_stance = true;
 
@@ -1896,21 +2045,27 @@ namespace
                 {
                     update_serve_bar();
                 }
-                else if(timer >= CPU_SERVE_DELAY && cpu->x == cpu_target_x)
+                else if(cpu->x == cpu_target_x)
                 {
-                    ball.vh = TOSS_SPEED;
-                    st = state::TOSS;
-                    timer = 0;
-                    sb::sfx(bn::sound_items::sfx_jump);
+                    // In its corner: it gets into its serving stance, then tosses.
+                    cpu->serve_stance = timer >= CPU_SERVE_DELAY - 30;
+
+                    if(timer >= CPU_SERVE_DELAY)
+                    {
+                        ball.vh = CPU_TOSS_SPEED;
+                        st = state::TOSS;
+                        timer = 0;
+                        sb::sfx(bn::sound_items::sfx_jump);
+                    }
                 }
                 break;
 
             case state::TOSS:
-                // The ball goes up; it's hit at the top of the toss (with the quality you timed).
+                // The CPU's toss: up, and hit as it falls back to paddle height.
                 ball.vh -= GRAVITY;
                 ball.h += ball.vh;
 
-                if(ball.vh <= 0)
+                if(ball.vh < 0 && ball.h <= SERVE_PADDLE_HEIGHT)
                 {
                     if(server == PLAYER)
                     {
@@ -2084,9 +2239,59 @@ namespace
             }
         }
 
+        // The spectators watch, and jump up and down after every point.
+        void animate_crowd()
+        {
+            if(cheer_timer > 0)
+            {
+                --cheer_timer;
+            }
+
+            for(int i = 0; i < crowd.size(); ++i)
+            {
+                spectator& sp = crowd[i];
+                const int* at = SPECTATOR_SPOTS[sp.spot];
+                bool cheering_now = cheer_timer > 0;
+                int hop = cheering_now && ((cheer_timer / 6 + i) % 2 == 0) ? 3 : 0;
+                sp.sprite.set_tiles(crowd_sprite_tiles(i), cheering_now ? CROWD_CHEER : CROWD_SIDE);
+                sp.sprite.set_y(at[1] - hop);
+            }
+        }
+
+        const bn::sprite_tiles_item& crowd_sprite_tiles(int index) const
+        {
+            int c = 0, n = 0;
+
+            for(; c < sb::character_count; ++c)
+            {
+                if(c == sb::player_character() || c == opponent)
+                {
+                    continue;
+                }
+
+                if(n == index)
+                {
+                    break;
+                }
+
+                ++n;
+            }
+
+            return crowd_sprite(c).tiles_item();
+        }
+
         // Screen shake, white flash and the burst star after a PERFECT shot.
         void update_effects()
         {
+            animate_crowd();
+            whoosh.set_visible(whoosh_timer > 0);
+
+            if(whoosh_timer > 0)
+            {
+                whoosh.set_tiles(bn::sprite_items::pingpong_whoosh.tiles_item(), whoosh_timer > 8 ? 0 : 1);
+                --whoosh_timer;
+            }
+
             int dx = 0, dy = 0;
 
             if(shake > 0)
@@ -2128,6 +2333,7 @@ namespace
             freeze = 0;
             burst_timer = 0;
             trail_timer = 0;
+            whoosh_timer = 0;
             set_white_flash(0);
             update_effects();
         }
@@ -2171,6 +2377,7 @@ namespace
         {
             message_label.set_visible(visible);
             hint_label.set_visible(visible);
+            score_label.set_visible(visible);
             my_score_label.set_visible(visible);
             cpu_score_label.set_visible(visible);
         }
@@ -2209,6 +2416,7 @@ namespace
                     // Hit-stop: everything holds still for a moment on a PERFECT shot.
                     --freeze;
                     burst.set_visible(true);
+                    whoosh.set_visible(whoosh_timer > 0);
                     continue;
                 }
 
@@ -2379,20 +2587,41 @@ void sb::pingpong_run()
         {
             if(first)
             {
-                const bn::string_view howto[] = {
-                    "Serve: hold A (fast) or B",
-                    "(spin); let go on red box.",
-                    "Rally: move < > to the ball,",
-                    "you swing by yourself.",
+                // Shown on the start screen (scroll with Up/Down) and in the pause menu. '#' = heading.
+                static constexpr bn::string_view howto[] = {
+                    "#Serve",
+                    "Hold A or B and let go",
+                    "when the meter is in the",
+                    "red box: a perfect serve!",
+                    "A: topspin (fast, flat)",
+                    "B: backspin (slow, curvy)",
+                    "",
+                    "#Rally",
+                    "Move < > to return the",
+                    "ball. You swing by",
+                    "yourself. Tap A to drive,",
+                    "tap B for a soft lob.",
+                    "",
+                    "#Smash",
+                    "Ready to attack? Hold A or",
+                    "B to build up power, then",
+                    "let go just as the ball",
+                    "reaches you. Full power +",
+                    "good timing = PERFECT!",
+                    "A: forehand, aims left",
+                    "B: backhand, aims right",
+                    "You move slower while",
+                    "charging a smash.",
+                    "",
+                    "#Win",
+                    "First to 5 points, and",
+                    "you must win by 2.",
                 };
 
                 if(! game_intro(GAME_PINGPONG, howto))
                 {
                     break;
                 }
-
-                message("Smash: hold A or B (you move", "slower), let go at the ball.",
-                        "A: forehand <   B: backhand >");
 
                 first = false;
             }

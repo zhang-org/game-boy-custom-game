@@ -9,7 +9,7 @@ PYTHON      	?=  python3
 SOURCES     	:=  src src/games
 INCLUDES    	:=  include
 DATA        	:=
-GRAPHICS    	:=  graphics/ui graphics/characters graphics/world graphics/flappy graphics/pingpong \
+GRAPHICS    	:=  graphics/ui graphics/characters graphics/crowd graphics/world graphics/flappy graphics/pingpong \
                     graphics/sled graphics/catch graphics/fishing graphics/horse
 AUDIO       	:=  audio
 AUDIOBACKEND	:=  maxmod

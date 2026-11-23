@@ -1331,11 +1331,22 @@ namespace
 
 void sb::fishing_run()
 {
-    constexpr bn::string_view howto[] = {
-        "Hold A, then let go to cast.",
-        "When you see ! press A!",
-        "Then press A in the green.",
+    // Shown on the start screen (scroll with Up/Down) and in the pause menu. '#' = heading.
+    static constexpr bn::string_view howto[] = {
+        "#Cast",
+        "Hold A, then let go to",
+        "cast. Longer = deeper.",
+        "",
+        "#Bite",
+        "Wait for the !, then press",
+        "A. Pressing too early",
+        "scares the fish away.",
+        "",
+        "#Reel",
+        "Press A when the marker",
+        "is in the green.",
         "Deep fish are worth more!",
+        "You have 90 seconds.",
     };
 
     bool leave = false;

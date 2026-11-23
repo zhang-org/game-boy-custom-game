@@ -922,11 +922,19 @@ namespace
 
 void sb::horse_run()
 {
-    constexpr bn::string_view howto[] = {
-        "Race across the snowy farm!",
-        "A: jump. Hold A: jump higher.",
-        "Clean jumps make you faster.",
-        "3 bumps and the race is over.",
+    // Shown on the start screen (scroll with Up/Down) and in the pause menu. '#' = heading.
+    static constexpr bn::string_view howto[] = {
+        "#Ride",
+        "A: jump. Hold A to jump",
+        "higher.",
+        "Jump the fences and hay",
+        "bales. Clean jumps give",
+        "you a burst of speed.",
+        "",
+        "#Race",
+        "3 bumps and the race is",
+        "over. Your score is how",
+        "far you get.",
     };
 
     {
