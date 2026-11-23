@@ -2,15 +2,23 @@
 //
 // Pick a course (Easy, Medium or Hard). Every course is the same each time you ride it, so you can learn it
 // and beat your best time. Steer through the slalom gates (a missed gate adds MISSED_GATE_PENALTY), hit the
-// snow ramps to fly over logs, and dodge trees, rocks and snowmen (a crash costs you speed). Hold A to tuck
-// (faster, but you steer less) and B to brake and carve (slower, sharper turns).
+// snow ramps to fly over logs, and dodge trees, rocks and snowmen (a crash costs you speed). Hold B to brake
+// and carve (slower, sharper turns). (There used to be a "tuck" on A: too fast to dodge anything.)
 //
 // View: top-down 3/4. The sled stays in the upper part of the screen and the course scrolls UP past it.
+// Everything is drawn at ZOOM (80%) so you can see further down the hill. All the game logic works in
+// unzoomed "course" coordinates (as before the zoom); only draw_x() / draw_y() scale things for the screen.
 // Records: the best time on each course (sb_save extra records SLED_RECORD_SLOT + course).
+// Ghost: your best run on each course is saved too (SRAM from GHOST_SRAM_OFFSET, see
+// docs/decisions/0003-sram-map.md) and rides along as a see-through sled.
 //
 // Art: tools/art/make_sled.py -> graphics/sled/. Music: sled_song.
 #include "bn_bg_palettes.h"
+#include "bn_blending.h"
 #include "bn_color.h"
+#include "bn_sprite_affine_mat_ptr.h"
+#include "bn_sram.h"
+#include "bn_unique_ptr.h"
 #include "bn_fixed.h"
 #include "bn_keypad.h"
 #include "bn_log.h"
@@ -71,8 +79,6 @@ namespace
     };
     constexpr int COURSE_COUNT = 3;
 
-    constexpr bn::fixed TUCK_SPEED = 1.35;      // hold A: top speed x this ...
-    constexpr bn::fixed TUCK_STEER = 0.6;       // ... but you steer this much less
     constexpr bn::fixed BRAKE_SPEED = 0.5;      // hold B: top speed x this ...
     constexpr bn::fixed BRAKE_STEER = 1.4;      // ... and you turn sharper
     constexpr bn::fixed SPEED_EASE_UP = bn::fixed(1) / 50;   // how quickly you pick up speed
@@ -98,16 +104,69 @@ namespace
     constexpr bn::fixed CRASH_SPEED_FACTOR = bn::fixed(1) / 4; // speed kept right after a crash
     constexpr bn::fixed CRASH_BUMP = bn::fixed(3) / 2;         // sideways push away from what you hit
 
-    // Where the sled rides on screen and how far it can go sideways.
+    // Where the sled rides and how far it can go sideways (course coordinates: the y of things on the course
+    // is SLED_Y + their distance below the sled).
     constexpr int SLED_Y = -36;
     constexpr int SLED_X_LIMIT = 84;
     constexpr int START_CLEAR = 220;            // pixels of open hill before the first gate
-    constexpr int SPAWN_AHEAD = 140;            // things appear this far below the sled (just off screen)
+    constexpr int SPAWN_AHEAD = 200;            // things appear this far below the sled (just off screen)
     constexpr int DESPAWN_Y = -104;
     constexpr int FINISH_COAST_FRAMES = 80;     // gliding to a stop after the finish line
 
+    // Zoomed out: the course is drawn at ZOOM, with the sled at screen y SLED_DRAW_Y. At 80% with the sled
+    // 16 px higher you see ~165 px of hill ahead instead of 116.
+    constexpr bn::fixed ZOOM = 0.8;
+    constexpr int SLED_DRAW_Y = -52;
+
+    bn::fixed draw_x(bn::fixed x)
+    {
+        return x * ZOOM;
+    }
+
+    bn::fixed draw_y(bn::fixed y)
+    {
+        return SLED_DRAW_Y + (y - SLED_Y) * ZOOM;
+    }
+
+    // The ghost: your best run on each course, a sample every GHOST_EVERY frames (up to GHOST_MAX samples,
+    // ~100 s), saved in SRAM after the main save (sb_save uses bytes 0..2047).
+    constexpr int GHOST_EVERY = 4;
+    constexpr int GHOST_MAX = 1536;
+    constexpr int GHOST_SRAM_OFFSET = 4096;
+    constexpr int GHOST_SRAM_STRIDE = 4864;     // bytes per course
+    constexpr bn::fixed GHOST_ALPHA = 0.5;
+
+    struct ghost_run
+    {
+        char tag[8];                // "SBGHOST1"
+        int course;
+        int character;
+        int count;                  // samples used
+        signed char x[GHOST_MAX];   // sled x
+        unsigned short d[GHOST_MAX]; // distance travelled
+        unsigned checksum;
+    };
+
+    static_assert(sizeof(ghost_run) <= GHOST_SRAM_STRIDE);
+    static_assert(GHOST_SRAM_OFFSET + 3 * GHOST_SRAM_STRIDE <= 32 * 1024);
+
+    constexpr char GHOST_TAG[8] = { 'S', 'B', 'G', 'H', 'O', 'S', 'T', '1' };
+
+    unsigned ghost_checksum(const ghost_run& g)
+    {
+        const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&g);
+        unsigned sum = 0x5eed;
+
+        for(int i = 0; i < int(sizeof(ghost_run) - sizeof(unsigned)); ++i)
+        {
+            sum = (sum << 5) + sum + bytes[i];
+        }
+
+        return sum;
+    }
+
     // Pools.
-    constexpr int OBJECT_POOL = 24;
+    constexpr int OBJECT_POOL = 32;
     constexpr int TRACK_POOL = 14;
     constexpr int PUFF_POOL = 8;
     constexpr int SNOWFLAKES = 12;
@@ -215,11 +274,14 @@ namespace
                 }
 
                 // 7 random numbers per pair, then 1 for the gap to the next pair (see skip()).
-                int left_x = -rnd.range(92, 104);
+                // (Further out than before the zoom, so they line the screen's edges. Out of reach of the
+                // sled: SLED_X_LIMIT + half a sled < 100 - half a tree. The ranges don't change how many
+                // random numbers are used, so the courses keep their layout.)
+                int left_x = -rnd.range(100, 138);
                 int left_type = rnd.range(0, 1) ? IT_PINE : IT_SNOWY_PINE;
                 int left_flip = rnd.range(0, 1);
                 int right_d = next_d + rnd.range(10, 30);
-                int right_x = rnd.range(92, 104);
+                int right_x = rnd.range(100, 138);
                 int right_type = rnd.range(0, 1) ? IT_PINE : IT_SNOWY_PINE;
                 int right_flip = rnd.range(0, 1);
                 pending[0] = { next_d, short(left_x), char(left_type), char(left_flip) };
@@ -419,16 +481,33 @@ namespace
             _rider(sb::character_sprite(sb::player_character()).create_sprite(0, SLED_Y + RIDER_DY, sb::FRAME_SIT)),
             _shadow(bn::sprite_items::sled_course.create_sprite(0, SLED_Y, CF_SHADOW)),
             _fx(bn::sprite_items::sled_fx.create_sprite(0, 0, 0)),
-            _snow(SNOWFLAKES, 1)
+            _ghost_sled(bn::sprite_items::sled_sled.create_sprite(0, 200, 0)),
+            _zoom(bn::sprite_affine_mat_ptr::create()),
+            _zoom_flipped(bn::sprite_affine_mat_ptr::create()),
+            _snow(SNOWFLAKES, 1),
+            _ghost(bn::make_unique<ghost_run>()),
+            _recording(bn::make_unique<ghost_run>())
         {
+            _zoom.set_scale(ZOOM);
+            _zoom_flipped.set_scale(ZOOM);
+            _zoom_flipped.set_horizontal_flip(true);
             _bg.set_priority(BG_PRIORITY);
             _sled.set_bg_priority(SPRITE_PRIORITY);
+            _sled.set_affine_mat(_zoom);
             _rider.set_bg_priority(SPRITE_PRIORITY);
+            _rider.set_affine_mat(_zoom);
             _shadow.set_bg_priority(SPRITE_PRIORITY);
+            _shadow.set_affine_mat(_zoom);
             _shadow.set_z_order(Z_BEHIND);
             _shadow.set_visible(false);
             _fx.set_bg_priority(SPRITE_PRIORITY);
+            _fx.set_affine_mat(_zoom);
             _fx.set_visible(false);
+            _ghost_sled.set_bg_priority(SPRITE_PRIORITY);
+            _ghost_sled.set_affine_mat(_zoom);
+            _ghost_sled.set_z_order(Z_BEHIND);
+            _ghost_sled.set_blending_enabled(true);
+            _ghost_sled.set_visible(false);
 
             for(int i = 0; i < OBJECT_POOL; ++i)
             {
@@ -439,6 +518,7 @@ namespace
             {
                 bn::sprite_ptr sprite = bn::sprite_items::sled_track.create_sprite(0, 0, 0);
                 sprite.set_bg_priority(TRACK_PRIORITY);
+                sprite.set_affine_mat(_zoom);
                 sprite.set_visible(false);
                 _tracks.push_back({ sprite, 0, false });
             }
@@ -447,6 +527,7 @@ namespace
             {
                 bn::sprite_ptr sprite = bn::sprite_items::sled_puff.create_sprite(0, 0, 0);
                 sprite.set_bg_priority(SPRITE_PRIORITY);
+                sprite.set_affine_mat(_zoom);
                 sprite.set_visible(false);
                 _puffs.push_back({ sprite, 0, 0, 0, 0, false });
             }
@@ -504,8 +585,29 @@ namespace
             _popup.clear();
             _count_label.clear();
             _bg.set_y(0);
+            load_ghost();
+            _recording->count = 1;
+            _recording->x[0] = 0;
+            _recording->d[0] = 0;
             spawn_items();
             place_sled();
+            place_ghost();
+        }
+
+        // Saves this run as the course's ghost (call when it set a new record).
+        void save_ghost()
+        {
+            ghost_run& g = *_recording;
+
+            for(int i = 0; i < 8; ++i)
+            {
+                g.tag[i] = GHOST_TAG[i];
+            }
+
+            g.course = _course;
+            g.character = sb::player_character();
+            g.checksum = ghost_checksum(g);
+            bn::sram::write_offset(g, GHOST_SRAM_OFFSET + _course * GHOST_SRAM_STRIDE);
         }
 
         // Total time in hundredths of a second (riding time + penalties).
@@ -558,8 +660,9 @@ namespace
                 _vx = _vx * bn::fixed(9) / 10;
                 scroll_world();
                 update_fx();
-                _snow.update(0, -_speed / 2);
+                _snow.update(0, -_speed / 2 * ZOOM);
                 place_sled();
+                place_ghost();
                 return --_coast <= 0;
             }
 
@@ -567,12 +670,14 @@ namespace
             update_speed();
             steer();
             scroll_world();
+            record_ghost();
             spawn_items();
             spawn_tracks();
             check_course();
             update_fx();
-            _snow.update(0, -_speed * bn::fixed(7) / 10);
+            _snow.update(0, -_speed * bn::fixed(7) / 10 * ZOOM);
             place_sled();
+            place_ghost();
             update_hud();
             return false;
         }
@@ -585,7 +690,14 @@ namespace
         bn::sprite_ptr _rider;
         bn::sprite_ptr _shadow;
         bn::sprite_ptr _fx;
+        bn::sprite_ptr _ghost_sled;
+        bn::sprite_affine_mat_ptr _zoom;
+        bn::sprite_affine_mat_ptr _zoom_flipped;
         sb::snowfall _snow;
+        bn::unique_ptr<ghost_run> _ghost;       // the best run on this course (count 0 = none yet)
+        bn::unique_ptr<ghost_run> _recording;   // this run
+        bn::optional<bn::sprite_ptr> _ghost_rider;
+        bn::fixed _fx_x, _fx_y;
         bn::vector<course_item, MAX_ITEMS> _items;
         edge_trees _edges;
         course_item _edge_item = {};
@@ -642,11 +754,6 @@ namespace
             }
         }
 
-        bool tucking() const
-        {
-            return bn::keypad::a_held() && _crash == 0;
-        }
-
         bool braking() const
         {
             return bn::keypad::b_held();
@@ -666,11 +773,6 @@ namespace
 
             bn::fixed target = def().cruise;
 
-            if(tucking())
-            {
-                target *= TUCK_SPEED;
-            }
-
             if(braking())
             {
                 target *= BRAKE_SPEED;
@@ -678,7 +780,7 @@ namespace
 
             if(_speed < target)
             {
-                _speed = bn::min(target, _speed + SPEED_EASE_UP * (tucking() ? 2 : 1));
+                _speed = bn::min(target, _speed + SPEED_EASE_UP);
             }
             else if(_air == 0)
             {
@@ -714,7 +816,7 @@ namespace
                 }
             }
 #endif
-            bn::fixed grip = tucking() ? TUCK_STEER : braking() ? BRAKE_STEER : bn::fixed(1);
+            bn::fixed grip = braking() ? BRAKE_STEER : bn::fixed(1);
 
             if(_air > 0)
             {
@@ -770,7 +872,7 @@ namespace
         void scroll_world()
         {
             _travel += _speed;
-            _bg_y -= _speed;
+            _bg_y -= _speed * ZOOM;
 
             if(_bg_y < -256)
             {
@@ -816,7 +918,7 @@ namespace
                     continue;
                 }
 
-                t.sprite.set_y(t.y);
+                t.sprite.set_y(draw_y(t.y));
             }
 
             for(puff& p : _puffs)
@@ -837,7 +939,7 @@ namespace
 
                 p.x += p.dx;
                 p.y -= _speed - bn::fixed(1) / 4;
-                p.sprite.set_position(p.x, p.y);
+                p.sprite.set_position(draw_x(p.x), draw_y(p.y));
                 p.sprite.set_tiles(bn::sprite_items::sled_puff.tiles_item(), p.age / 6);
             }
 
@@ -852,24 +954,24 @@ namespace
             {
             case IT_GATE:
                 // Two poles, gate_half to the left and right of the middle.
-                o.a->set_position(it.x - def().gate_half, o.y);
-                o.b->set_position(it.x + def().gate_half, o.y);
+                o.a->set_position(draw_x(it.x - def().gate_half), draw_y(o.y));
+                o.b->set_position(draw_x(it.x + def().gate_half), draw_y(o.y));
                 break;
             case IT_LOG:
-                o.a->set_position(it.x - 16, o.y);
-                o.b->set_position(it.x + 16, o.y);
+                o.a->set_position(draw_x(it.x - 16), draw_y(o.y));
+                o.b->set_position(draw_x(it.x + 16), draw_y(o.y));
                 break;
             case IT_FINISH:
-                o.a->set_position(-32, o.y);
-                o.b->set_position(32, o.y);
+                o.a->set_position(draw_x(-32), draw_y(o.y));
+                o.b->set_position(draw_x(32), draw_y(o.y));
                 z = Z_FRONT;
                 break;
             case IT_RAMP:
-                o.a->set_position(it.x, o.y);
+                o.a->set_position(draw_x(it.x), draw_y(o.y));
                 z = Z_BEHIND;   // you ride on top of it
                 break;
             default:
-                o.a->set_position(it.x, o.y);
+                o.a->set_position(draw_x(it.x), draw_y(o.y));
                 break;
             }
 
@@ -885,6 +987,7 @@ namespace
         {
             bn::sprite_ptr sprite = item.create_sprite(0, 200, frame);
             sprite.set_bg_priority(SPRITE_PRIORITY);
+            sprite.set_affine_mat(_zoom);
             return sprite;
         }
 
@@ -969,7 +1072,11 @@ namespace
                     break;
                 default:
                     slot->a = make_sprite(bn::sprite_items::sled_obstacles, it.type);
-                    slot->a->set_horizontal_flip(it.type != IT_SNOWMAN && it.variant);
+                    // (Affine sprites flip with their matrix, not set_horizontal_flip().)
+                    if(it.type != IT_SNOWMAN && it.variant)
+                    {
+                        slot->a->set_affine_mat(_zoom_flipped);
+                    }
                     break;
                 }
 
@@ -991,7 +1098,7 @@ namespace
                     p.y = SLED_Y + 10;
                     p.dx = bn::fixed(direction) * (bn::fixed(1) / 2 + bn::fixed(sb::rand_range(0, 8)) / 16);
                     p.age = 0;
-                    p.sprite.set_position(p.x, p.y);
+                    p.sprite.set_position(draw_x(p.x), draw_y(p.y));
                     p.sprite.set_tiles(bn::sprite_items::sled_puff.tiles_item(), 0);
                     p.sprite.set_z_order(Z_BEHIND);
                     p.sprite.set_visible(true);
@@ -1023,7 +1130,7 @@ namespace
                     bn::fixed slope = _speed > 0 ? _vx / _speed : bn::fixed(0);
                     int frame = slope < bn::fixed(-3) / 10 ? 1 : slope > bn::fixed(3) / 10 ? 2 : 0;
                     t.sprite.set_tiles(bn::sprite_items::sled_track.tiles_item(), frame);
-                    t.sprite.set_position(_x, t.y);
+                    t.sprite.set_position(draw_x(_x), draw_y(t.y));
                     t.sprite.set_visible(true);
                     return;
                 }
@@ -1159,7 +1266,9 @@ namespace
         {
             _fx_frame = frame;
             _fx.set_tiles(bn::sprite_items::sled_fx.tiles_item(), frame);
-            _fx.set_position(x, y);
+            _fx_x = x;
+            _fx_y = y;
+            _fx.set_position(draw_x(_fx_x), draw_y(_fx_y));
             _fx.set_z_order(Z_FX);
             _fx.set_visible(true);
             _fx_timer = 24;
@@ -1170,7 +1279,8 @@ namespace
             if(_fx_timer > 0)
             {
                 --_fx_timer;
-                _fx.set_y(_fx.y() - _speed);
+                _fx_y -= _speed;
+                _fx.set_position(draw_x(_fx_x), draw_y(_fx_y));
 
                 if(_fx_timer == 10 && _fx_frame == 0)
                 {
@@ -1186,6 +1296,94 @@ namespace
             if(_popup_timer > 0 && --_popup_timer == 0)
             {
                 _popup.clear();
+            }
+        }
+
+        // ---------------------------------------------------------------- the ghost
+        void load_ghost()
+        {
+            ghost_run& g = *_ghost;
+            bn::sram::read_offset(g, GHOST_SRAM_OFFSET + _course * GHOST_SRAM_STRIDE);
+            bool ok = g.course == _course && g.count > 1 && g.count <= GHOST_MAX && g.checksum == ghost_checksum(g);
+
+            for(int i = 0; i < 8 && ok; ++i)
+            {
+                ok = g.tag[i] == GHOST_TAG[i];
+            }
+
+            if(! ok || g.character < 0 || g.character >= sb::character_count)
+            {
+                g.count = 0;
+            }
+
+            _ghost_rider.reset();
+            _ghost_sled.set_visible(false);
+
+            if(g.count > 0)
+            {
+                _ghost_rider = sb::character_sprite(g.character).create_sprite(0, 200, sb::FRAME_SIT);
+                _ghost_rider->set_bg_priority(SPRITE_PRIORITY);
+                _ghost_rider->set_affine_mat(_zoom);
+                _ghost_rider->set_z_order(Z_BEHIND);
+                _ghost_rider->set_blending_enabled(true);
+                _ghost_rider->set_visible(false);
+                bn::blending::set_transparency_alpha(GHOST_ALPHA);
+            }
+        }
+
+        void record_ghost()
+        {
+            ghost_run& g = *_recording;
+
+            if(_time_frames % GHOST_EVERY != 0 || g.count >= GHOST_MAX)
+            {
+                return;
+            }
+
+            g.x[g.count] = static_cast<signed char>(_x.round_integer());
+            g.d[g.count] = static_cast<unsigned short>(bn::min(_travel.integer(), 65535));
+            ++g.count;
+        }
+
+        // The ghost sled where your best run was at this moment of the race (between two samples).
+        void place_ghost()
+        {
+            const ghost_run& g = *_ghost;
+
+            if(g.count == 0 || ! _ghost_rider)
+            {
+                return;
+            }
+
+            int k = _time_frames / GHOST_EVERY;
+            int frac = _time_frames % GHOST_EVERY;
+            bn::fixed gx, gd;
+            int lean = 0;
+
+            if(k + 1 < g.count)
+            {
+                gx = bn::fixed(g.x[k]) + bn::fixed(g.x[k + 1] - g.x[k]) * frac / GHOST_EVERY;
+                gd = bn::fixed(g.d[k]) + bn::fixed(g.d[k + 1] - g.d[k]) * frac / GHOST_EVERY;
+                lean = g.x[k + 1] - g.x[k];
+            }
+            else
+            {
+                gx = g.x[g.count - 1];      // the ghost has finished: it waits at the finish line
+                gd = g.d[g.count - 1];
+            }
+
+            bn::fixed gy = bn::fixed(SLED_Y) + (gd - _travel);
+            bool visible = gy > DESPAWN_Y && gy < SLED_Y + SPAWN_AHEAD;
+            _ghost_sled.set_visible(visible);
+            _ghost_rider->set_visible(visible);
+
+            if(visible)
+            {
+                int frame = lean < -2 ? 1 : lean > 2 ? 2 : 0;   // samples are 4 frames apart: > 0.6 px/frame
+                _ghost_sled.set_tiles(bn::sprite_items::sled_sled.tiles_item(), frame);
+                _ghost_sled.set_position(draw_x(gx), draw_y(gy));
+                _ghost_rider->set_position(draw_x(gx + (frame == 1 ? -1 : frame == 2 ? 1 : 0)),
+                                           draw_y(gy + RIDER_DY));
             }
         }
 
@@ -1216,13 +1414,12 @@ namespace
             }
 
             _shadow.set_visible(_air > 0);
-            _shadow.set_position(_x, SLED_Y + 8);
+            _shadow.set_position(draw_x(_x), draw_y(SLED_Y + 8));
 
             int rattle = (_speed > 2 && _air == 0 && (_frames / 3) % 2 == 0) ? 1 : 0;
-            int crouch = tucking() && _air == 0 ? 2 : 0;  // tucked low
             _sled.set_tiles(bn::sprite_items::sled_sled.tiles_item(), frame);
-            _sled.set_position(_x, SLED_Y + rattle - lift);
-            _rider.set_position(_x + rider_dx, SLED_Y + RIDER_DY + rattle - lift + crouch);
+            _sled.set_position(draw_x(_x), draw_y(SLED_Y + rattle - lift));
+            _rider.set_position(draw_x(_x + rider_dx), draw_y(SLED_Y + RIDER_DY + rattle - lift));
             _sled.set_z_order(Z_SLED);
             _rider.set_z_order(Z_RIDER);
 
@@ -1277,11 +1474,16 @@ namespace
     }
 
     // The result box: your time, and the best time on every course. Returns true to ride again.
-    bool show_results(const sled_game& game)
+    bool show_results(sled_game& game)
     {
         int hundredths = game.result_hundredths();
         bool record = sb::submit_extra(SLED_RECORD_SLOT + g_course_choice, SLED_RECORD_BASE - hundredths,
                                        sb::player_character());
+
+        if(record)
+        {
+            game.save_ghost();      // the new best run becomes the course's ghost
+        }
         sb::play_jingle(record ? bn::music_items::jingle_record : bn::music_items::jingle_over);
 
         sb::panel(3, 0, 24, 14);
@@ -1390,10 +1592,14 @@ void sb::sled_run()
         "#Controls",
         "< > steer (you slide a",
         "little: steer early!)",
-        "Hold A: tuck, go faster,",
-        "but you turn less.",
         "Hold B: brake and carve",
         "sharper turns.",
+        "",
+        "#Ghost",
+        "Set a record and a see-",
+        "through sled replays",
+        "that run next time.",
+        "Race your own ghost!",
         "",
         "#Ramps and crashes",
         "Hit a snow ramp to fly",
