@@ -237,11 +237,10 @@ namespace sb
                 labels.back().set(-104, ty, game(i).title);
                 labels.emplace_back();
 
-                if(best_score(i) > 0)
+                bn::string<40> text = best_record_text(i, true);
+
+                if(! text.empty())
                 {
-                    bn::string<32> text(to_text(best_score(i)));
-                    text.append("  ");
-                    text.append(best_name(i));
                     labels.back().set(104, ty, text, text_color::RED, align::RIGHT);
                 }
                 else
@@ -694,11 +693,11 @@ namespace sb
                         info_game.set(104, y0 + 12, game(place).title, text_color::BLUE, align::RIGHT);
                         bn::string<48> best("{ Best: ");
 
-                        if(best_score(place) > 0)
+                        bn::string<40> record = best_record_text(place);
+
+                        if(! record.empty())
                         {
-                            best.append(to_text(best_score(place)));
-                            best.append(" by ");
-                            best.append(best_name(place));
+                            best.append(record);
                         }
                         else
                         {

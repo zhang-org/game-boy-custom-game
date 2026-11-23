@@ -290,13 +290,12 @@ namespace sb
         }
 
         bn::string<48> best_text;
+        bn::string<40> record = best_record_text(game_index);
 
-        if(best_score(game_index) > 0)
+        if(! record.empty())
         {
             best_text.append("{ Best: ");
-            best_text.append(to_text(best_score(game_index)));
-            best_text.append(" by ");
-            best_text.append(best_name(game_index));
+            best_text.append(record);
             best.set(0, text_y(y + 14) - 4, best_text, text_color::RED, align::CENTER);
         }
 
@@ -371,12 +370,11 @@ namespace sb
         score_label.set(0, text_y(y + 5), score_text, text_color::DARK, align::CENTER);
 
         bn::string<48> best_text("{ Best: ");
+        bn::string<40> best_record = best_record_text(game_index);
 
-        if(best_score(game_index) > 0)
+        if(! best_record.empty())
         {
-            best_text.append(to_text(best_score(game_index)));
-            best_text.append(" by ");
-            best_text.append(best_name(game_index));
+            best_text.append(best_record);
         }
         else
         {
