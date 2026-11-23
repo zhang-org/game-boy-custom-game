@@ -1,13 +1,13 @@
 """Generates the town map: gba/graphics/world/world_map.bmp (512x512) and include/sb_world_layout.h.
 
 The town is a 32x32 grid of 16x16 cells. build_layout() decides what goes in each cell; paint()
-draws it. The layout header tells the game which cells are walkable and where the six places are.
+draws it. The layout header tells the game which cells are walkable and where the seven places are.
 
 Layout characters:
   .  snow (walk)        :  path (walk)          T  pine tree        ~  frozen pond
   #  fence              o  rock / bush          B  building/object (blocked, drawn by a stamp)
-  1-6  doorstep of a place (walk; see sb_games.h: 1 flappy, 2 ping pong, 3 sled, 4 catch,
-       5 fishing, 6 horse)
+  1-7  doorstep of a place (walk; see sb_games.h: 1 flappy, 2 ping pong, 3 sled, 4 catch,
+       5 fishing, 6 horse, 7 snowball fight)
   N  a family member stands here (walk tile, blocked while they stand on it)
   P  where you start
 To move things around, edit build_layout() and STAMPS, then run:
@@ -98,7 +98,8 @@ def build_layout():
 
     # Homes, lamps, decorations.
     fill(20, 22, 22, 24, "B")
-    fill(25, 22, 27, 24, "B")
+    fill(24, 22, 28, 24, "B")      # the Snow Fort (5 wide: the gate is in the middle cell, x=26)
+    g[25][26] = "7"
     fill(23, 26, 25, 28, "B")
     for x, y in LAMPS:
         g[y][x] = "B"              # lamp posts
@@ -156,7 +157,7 @@ def paint_snow(c, x, y):
 
 
 def is_path(g, x, y):
-    return 0 <= x < N and 0 <= y < N and g[y][x] in ":123456P"
+    return 0 <= x < N and 0 <= y < N and g[y][x] in ":1234567P"
 
 
 def paint_path(c, g, x, y):
@@ -358,6 +359,73 @@ def paint_snowman(c, x, y):
         "...ooooooooooo..",
         "....SSSSSSSSS...",
     ], {"o": OUTL, "k": BLACK, "w": SPARK, "c": CARROT, "r": RED, "s": SNOW_S, "S": SNOW_D})
+
+
+def paint_snow_fort(c, cx, cy):
+    """The Snow Fort (Snowball Fight), 5 x 3 cells: a wall of snow blocks with battlements, a round tower
+    at each end with a red flag, an arched gate in the middle (its doormat is below it), and piles of
+    snowballs. It looks like the fort you defend in the game (tools/art/make_snowball.py)."""
+    px, py, pw = cx * CELL, cy * CELL - 6, 5 * CELL
+    base = (cy + 3) * CELL
+    OBJECTS.append((px, px + pw, py - 14, base))
+    wall_top = py + 10
+    # The wall: rows of snow blocks.
+    for y in range(wall_top, base):
+        row = (y - wall_top) // 6
+        for x in range(px + 6, px + pw - 6):
+            edge = (y - wall_top) % 6 == 5 or (x - px + (row % 2) * 6) % 12 == 0
+            c.set(x, y, SNOW_D if edge else (SPARK if (y - wall_top) % 6 == 0 else SNOW))
+    # Battlements along the top.
+    for x0 in range(px + 8, px + pw - 10, 10):
+        c.rect(x0, wall_top - 6, 6, 6, SNOW)
+        c.hline(x0, x0 + 5, wall_top - 6, SPARK)
+        c.vline(x0 + 5, wall_top - 5, wall_top - 1, SNOW_S)
+    # Round towers at both ends, a little taller.
+    for tx in (px, px + pw - 14):
+        top_y = py - 2
+        for y in range(top_y, base):
+            for x in range(tx, tx + 14):
+                shade = SNOW_S if x >= tx + 10 else SPARK if x <= tx + 2 else SNOW
+                if (y - top_y) % 7 == 6:
+                    shade = SNOW_D
+                c.set(x, y, shade)
+        for x0 in (tx, tx + 5, tx + 10):        # tower battlements
+            c.rect(x0, top_y - 4, 4, 4, SNOW)
+        c.vline(tx + 7, top_y - 14, top_y - 4, BROWN)   # flag pole and flag
+        c.ascii(tx + 8, top_y - 14, ["rrrr", "rrrrr", "rrrr", "r"], {"r": RED})
+        c.rect(tx, top_y - 4, 14, 1, OUTL)
+        c.vline(tx - 1, top_y - 4, base - 1, OUTL)
+        c.vline(tx + 14, top_y - 4, base - 1, OUTL)
+    # The gate: a dark arch in the middle.
+    gx = px + pw // 2 - 7
+    for y in range(base - 18, base):
+        for x in range(gx, gx + 14):
+            dx = x - (gx + 6.5)
+            if y >= base - 12 or dx * dx + (y - (base - 12)) ** 2 * 2.2 <= 49:
+                c.set(x, y, BLUE_D if y < base - 3 else OUTL)
+    for x in range(gx - 1, gx + 15):            # snow lintel over the arch
+        if c.get(x, base - 19) is not None:
+            c.set(x, base - 19, SNOW_D)
+    # Snowball piles beside the gate.
+    for bx in (px + 16, px + pw - 22):
+        for (dx, dy) in ((0, 0), (5, 0), (10, 0), (2, -4), (7, -4), (5, -8)):
+            c.ellipse(bx + dx + 2.5, base - 4 + dy, 2.6, 2.4, SPARK, outline=None)
+            c.set(bx + dx + 3, base - 3 + dy, SNOW_D)
+            c.set(bx + dx + 4, base - 3 + dy, SNOW_D)
+    # Shade the bottom of the wall, then outline the whole fort so it stands out from the snow.
+    for x in range(px + 14, px + pw - 14):
+        for y in (base - 2, base - 1):
+            if c.get(x, y) in (SNOW, SPARK):
+                c.set(x, y, SNOW_S)
+    marks = []
+    for y in range(py - 20, base + 1):
+        for x in range(px - 2, px + pw + 2):
+            if c.get(x, y) is None and any(c.get(x + dx, y + dy) is not None and
+                                           px - 1 <= x + dx <= px + pw and py - 20 <= y + dy <= base
+                                           for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+                marks.append((x, y))
+    for x, y in marks:
+        c.set(x, y, OUTL)
 
 
 def paint_presents(c, x, y):
@@ -653,7 +721,7 @@ def paint(g):
     for y in range(N):
         for x in range(N):
             ch = g[y][x]
-            if ch in ":123456P":
+            if ch in ":1234567P":
                 paint_path(c, g, x, y)
             elif ch == "~":
                 paint_ice(c, g, x, y)
@@ -661,7 +729,7 @@ def paint(g):
                 paint_snow(c, x, y)
     for y in range(N):
         for x in range(N):
-            if g[y][x] in "123456":
+            if g[y][x] in "1234567":
                 paint_doorstep(c, x, y)
     # 2. low things on the ground layer
     paint_hill(c)
@@ -684,7 +752,7 @@ def paint(g):
     paint_stable(top)
     paint_rec_hall(top)
     paint_house(top, 20, 22, RED, RED_D)
-    paint_house(top, 25, 22, PURPLE, rgb("#603890"), wall=rgb("#f8e8d8"))
+    paint_snow_fort(top, 24, 22)
     paint_house(top, 23, 26, BLUE, BLUE_D, wall=rgb("#e8f0f8"))
     paint_christmas_tree(top)
     for x, y in LAMPS:
@@ -711,7 +779,7 @@ def count_tiles(c):
 
 
 def walkable(ch):
-    return ch in ".:123456NP"
+    return ch in ".:1234567NP"
 
 
 def write_layout_header(g):
