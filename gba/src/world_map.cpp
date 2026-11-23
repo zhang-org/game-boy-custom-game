@@ -76,21 +76,32 @@ namespace sb
         constexpr int FEET_OFFSET = 16;
 
         // True when a person standing at (centre x, sprite centre y) is behind something on the top layer.
+        // The whole top layer is one picture, so a person can only be in front of all of it or behind all of it.
+        // When they're behind one thing (the roof of the blue house below them) but in front of another that
+        // overlaps their sprite (the Snow Fort above them), "behind" would hide them under the second thing, so
+        // in front wins: a few pixels of roof under their feet look much better than a missing head.
         bool is_behind_something(const bn::fixed& x, const bn::fixed& y)
         {
-            int x0 = x.right_shift_integer() + HALF_MAP - 5;
-            int x1 = x0 + 10;
+            int cx = x.right_shift_integer() + HALF_MAP;
+            int x0 = cx - 5;
+            int x1 = cx + 5;
             int feet = y.right_shift_integer() + HALF_MAP + FEET_OFFSET;
+            int head = feet - 30;
+            bool behind = false;
 
             for(const world_object& o : world_objects)
             {
                 if(x0 < o.x1 && x1 > o.x0 && feet > o.top && feet < o.base)
                 {
-                    return true;
+                    behind = true;
+                }
+                else if(feet >= o.base && head < o.base && cx - 7 < o.x1 && cx + 7 > o.x0)
+                {
+                    return false;
                 }
             }
 
-            return false;
+            return behind;
         }
 
         // Puts a sprite in front of or behind the top layer (trees, houses ...) for where it stands.
@@ -756,10 +767,14 @@ namespace sb
         {
             game(next_game).run();
             panel_clear();
+            // Butano frees a scene's backgrounds at the next frame, so wait one before the map asks for the space
+            // (its top layer needs 10 blocks in one piece).
+            update();
         }
         else if(next == action::CHANGE_CHARACTER)
         {
             character_select_scene(true);
+            update();
         }
     }
 }

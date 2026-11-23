@@ -217,12 +217,16 @@ def shovel(c, x, y):
 def make_cover(yard_screen):
     c = Canvas(256, 256)
     s = Canvas(240, 160)
-    # 1. The skirts: copies of the yard below every cover.
+    # 1. The skirts: copies of the yard below every cover. A skirt leaves a gap where someone pops up from a
+    # NEARER cover: the whole cover layer is drawn over the family, so the far drifts' skirts used to cut off
+    # the heads of the family at the near drifts (16 px wide sprites, up to 24 px above their cover's top).
+    rank = {"far": 0, "mid": 1, "near": 2}
     for kind, x, top in SPOTS:
         w = cover_width(kind)
+        nearer = [(x2, top2) for kind2, x2, top2 in SPOTS if rank[kind2] > rank[kind]]
         for y in range(top, min(160, top + SKIRT_TO)):
             for xx in range(x - w // 2, x + w // 2):
-                if 0 <= xx < 240:
+                if 0 <= xx < 240 and not any(abs(xx - x2) <= 8 and y < top2 for x2, top2 in nearer):
                     s.set(xx, y, yard_screen.get(xx, y))
     # 2. The covers themselves, outlined, on top.
     covers = Canvas(240, 160)
