@@ -43,6 +43,7 @@
 #include "sb_characters.h"
 #include "sb_core.h"
 #include "sb_games.h"
+#include "sb_save.h"
 #include "sb_text.h"
 #include "sb_ui.h"
 
@@ -1327,6 +1328,12 @@ namespace
             _sparkle.set_tiles(bn::sprite_items::fishing_sparkle.tiles_item(), ((_t / 5) % 2));
         }
     };
+}
+
+// The best record shown on the map, the intro and the high score list (sb_games.h: game_info::best_text).
+bn::string<40> sb::fishing_best_text(bool compact)
+{
+    return score_record_text(GAME_FISHING, compact);
 }
 
 void sb::fishing_run()

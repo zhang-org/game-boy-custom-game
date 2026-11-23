@@ -17,9 +17,10 @@ namespace sb
     // Records a finished game's score. Returns true (and saves) if it beat the old record.
     bool submit_score(int game, int score, int character);
 
-    // Extra records, for games that keep more than one (Ping Pong: one per difficulty, slots 0..2).
-    // The last slot is used internally (instructions-read flags).
-    constexpr int extra_record_count = 8;
+    // Extra records, for games that keep more than one (e.g. one per difficulty). Which game uses which
+    // slot is listed in docs/decisions/0002-record-slots.md. The last slot is used internally
+    // (instructions-read flags).
+    constexpr int extra_record_count = 24;
     int extra_score(int slot);
     const char* extra_name(int slot);
     bool submit_extra(int slot, int score, int character);
@@ -28,6 +29,14 @@ namespace sb
     // (Ping Pong: "Hard 5-2 by Adam"). Empty if nobody has a record yet. `compact` drops the "by" and
     // shortens words, for the high score list.
     bn::string<40> best_record_text(int game, bool compact = false);
+
+    // Helpers for a game's best_text function (sb_games.h):
+    // the plain best score, e.g. "1234 by Adam" ...
+    bn::string<40> score_record_text(int game, bool compact);
+    // ... or the hardest level that has a record, from `levels` extra slots starting at `first_slot`,
+    // e.g. "Hard 41.3s by Adam". `value_text` turns a saved value into text ("41.3s").
+    bn::string<40> level_record_text(int first_slot, int levels, const char* const* level_names,
+                                     bn::string<16> (*value_text)(int value), bool compact);
 
     // Has the player read (scrolled to the end of) a game's instructions at least once?
     bool howto_seen(int game);
