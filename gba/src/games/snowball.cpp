@@ -1,9 +1,10 @@
 // Snowball Fight: you defend your snow fort against the rest of the family, who pop up from behind the snow
 // drifts, walls and snowmen across the yard and throw back.
 //
-//   * D-pad moves your aim, A throws (the snowball takes a moment to fly there: lead your shots!).
-//   * Hold B to duck behind your wall: snowballs thrown at you splat on it, and while you're down you pack
-//     new snowballs (you carry at most AMMO_MAX).
+//   * The family pops up at three spots (left, middle, right). Left / Right picks one, A throws: it's like
+//     whack-a-mole. Snowballs are unlimited (there used to be ammo, packed by ducking: Charly found that
+//     not fun, and free aiming over seven spots too hectic).
+//   * Hold B to duck behind your wall: snowballs thrown at you splat on it.
 //   * Someone about to throw raises their arms and a "!" flashes over them. Their snowball grows as it
 //     flies at you: duck in time, or hit it in the air with one of yours (Intercept!).
 //   * Quick hits (right after someone pops up) and far targets score more.
@@ -122,6 +123,8 @@ namespace
         { -94, 16, ROW_NEAR }, { 94, 16, ROW_NEAR },
     };
     constexpr int SPOT_COUNT = 7;
+    constexpr int AIM_SPOTS = 3;                // the family only pops up at the three far drifts (SPOTS 0..2):
+                                                // left, middle, right. The walls and near drifts are scenery.
     constexpr int RISE_PX = 24;                 // px someone rises from hidden to up
 
     constexpr int PLAYER_X = 0;
@@ -322,8 +325,9 @@ namespace
             _between = 90;      // "Wave 1" shows first
             _finished = false;
             _won = false;
-            _aim_x = 0;
-            _aim_y = -20;
+            _aim_spot = 1;
+            _aim_x = SPOTS[1].x;
+            _aim_y = SPOTS[1].top - 10;
             _t = 0;
             _shown_score = -1;
             _shown_wave = -1;
@@ -390,7 +394,7 @@ namespace
 
             for(bn::sprite_ptr& icon : _ammo_icons)
             {
-                icon.set_visible(visible);
+                icon.set_visible(false);    // unlimited snowballs now: no ammo to show
             }
 
             for(int i = 0; i < _heart_icons.size(); ++i)
@@ -472,6 +476,7 @@ namespace
         int _intercepts = 0;
         int _quick = 0;
         int _ammo = 0;
+        int _aim_spot = 1;          // 0 left, 1 middle, 2 right
         int _reload = 0;
         int _cooldown = 0;
         int _duck = 0;            // 0 = up .. DUCK_FRAMES = fully down
@@ -513,7 +518,7 @@ namespace
         // Test builds only (make USERFLAGS=-DSNOWBALL_AUTOPILOT): aims at whoever is up, throws when on
         // target, ducks when a snowball is about to arrive, and reloads when low.
         bool _auto_duck = false;
-        int _auto_dx = 0, _auto_dy = 0;
+        int _auto_dx = 0;
         bool _auto_throw = false;
 
         void autopilot()
@@ -521,7 +526,6 @@ namespace
             _auto_duck = false;
             _auto_throw = false;
             _auto_dx = 0;
-            _auto_dy = 0;
 
             for(const ball& b : _theirs)
             {
@@ -529,11 +533,6 @@ namespace
                 {
                     _auto_duck = true;
                 }
-            }
-
-            if(_ammo == 0 || (_ammo < 2 && ! any_up()))
-            {
-                _auto_duck = true;
             }
 
             const foe* target = nullptr;
@@ -553,11 +552,8 @@ namespace
             }
 
             const spot& s = SPOTS[target->spot];
-            int tx = s.x, ty = s.top - 10;
-            int ax = _aim_x.integer(), ay = _aim_y.integer();
-            _auto_dx = tx > ax + 2 ? 1 : tx < ax - 2 ? -1 : 0;
-            _auto_dy = ty > ay + 2 ? 1 : ty < ay - 2 ? -1 : 0;
-            _auto_throw = _auto_dx == 0 && _auto_dy == 0 && target->raised >= RISE_PX - 4 && ! my_ball_heading_to(tx);
+            _auto_dx = target->spot > _aim_spot ? 1 : target->spot < _aim_spot ? -1 : 0;
+            _auto_throw = _auto_dx == 0 && target->raised >= RISE_PX - 4 && ! my_ball_heading_to(s.x);
         }
 
         bool my_ball_heading_to(int x) const
@@ -588,13 +584,11 @@ namespace
 
         bool duck_held() const { return _auto_duck; }
         bool throw_pressed() const { return _auto_throw; }
-        int aim_dx() const { return _auto_dx; }
-        int aim_dy() const { return _auto_dy; }
+        int aim_step() const { return _auto_dx; }
 #else
         static bool duck_held() { return bn::keypad::b_held(); }
         static bool throw_pressed() { return bn::keypad::a_pressed(); }
-        static int aim_dx() { return bn::keypad::left_held() ? -1 : bn::keypad::right_held() ? 1 : 0; }
-        static int aim_dy() { return bn::keypad::up_held() ? -1 : bn::keypad::down_held() ? 1 : 0; }
+        static int aim_step() { return bn::keypad::left_pressed() ? -1 : bn::keypad::right_pressed() ? 1 : 0; }
 #endif
 
         // ---------------------------------------------------------------- you
@@ -606,44 +600,21 @@ namespace
             bool down = duck_held() && ! _finished;
             _duck = bn::clamp(_duck + (down ? 1 : -1), 0, DUCK_FRAMES);
 
-            // Packing snowballs while ducked.
-            if(_duck == DUCK_FRAMES && _ammo < AMMO_MAX)
-            {
-                if(++_reload >= RELOAD_FRAMES)
-                {
-                    _reload = 0;
-                    ++_ammo;
-                    sb::sfx(bn::sound_items::sfx_select);
-                }
-            }
-            else
-            {
-                _reload = 0;
-            }
-
-            _aim_x = bn::clamp(_aim_x + AIM_SPEED * aim_dx(), bn::fixed(-116), bn::fixed(116));
-            _aim_y = bn::clamp(_aim_y + AIM_SPEED * aim_dy(), bn::fixed(AIM_MIN_Y), bn::fixed(AIM_MAX_Y));
+            // Left / Right picks one of the three spots; the aim glides there.
+            _aim_spot = bn::clamp(_aim_spot + aim_step(), 0, AIM_SPOTS - 1);
+            const spot& target = SPOTS[_aim_spot];
+            _aim_x += (bn::fixed(target.x) - _aim_x) / 3;
+            _aim_y += (bn::fixed(target.top - 10) - _aim_y) / 3;
 
             if(_cooldown > 0)
             {
                 --_cooldown;
             }
 
-            if(throw_pressed() && ! _finished && _between == 0)
+            // Unlimited snowballs: you just can't throw from behind the wall.
+            if(throw_pressed() && ! _finished && _between == 0 && _duck == 0 && _cooldown == 0)
             {
-                if(_duck > 0)
-                {
-                    // can't throw from behind the wall
-                }
-                else if(_ammo == 0)
-                {
-                    sb::sfx(bn::sound_items::sfx_bump);
-                    show_popup(0, 12, "Duck (B) to make snowballs!", sb::text_color::WHITE);
-                }
-                else if(_cooldown == 0)
-                {
-                    throw_mine();
-                }
+                throw_mine();
             }
         }
 
@@ -656,7 +627,8 @@ namespace
                     continue;
                 }
 
-                int tx = _aim_x.integer(), ty = _aim_y.integer();
+                // Straight at the chosen spot (not where the gliding aim happens to be right now).
+                int tx = SPOTS[_aim_spot].x, ty = SPOTS[_aim_spot].top - 10;
                 int dist = bn::abs(tx - HAND_X) + bn::abs(ty - HAND_Y);
                 b.active = true;
                 b.x0 = PLAYER_X + HAND_X;
@@ -664,11 +636,10 @@ namespace
                 b.x1 = tx;
                 b.y1 = ty;
                 b.t = 0;
-                b.duration = 12 + dist / 7;
+                b.duration = 10 + dist / 10;   // quick: it's about timing, not leading your shots
                 b.arc = 10 + dist / 6;
                 b.look = -1;
                 b.sprite.set_visible(true);
-                --_ammo;
                 ++_throws;
                 _cooldown = THROW_COOLDOWN;
                 sb::sfx(bn::sound_items::sfx_whoosh);
@@ -865,7 +836,7 @@ namespace
             int choices[SPOT_COUNT];
             int n = 0;
 
-            for(int s = 0; s < SPOT_COUNT; ++s)
+            for(int s = 0; s < AIM_SPOTS; ++s)
             {
                 if(! spot_taken(s) && (s != f.spot || sb::rand_range(0, 99) >= wave().move_percent))
                 {
@@ -1287,15 +1258,6 @@ namespace
                 }
             }
 
-            if(_ammo != _shown_ammo)
-            {
-                _shown_ammo = _ammo;
-
-                for(int i = 0; i < AMMO_MAX; ++i)
-                {
-                    _ammo_icons[i].set_tiles(bn::sprite_items::snowball_icons.tiles_item(), i < _ammo ? 2 : 3);
-                }
-            }
         }
     };
 
@@ -1410,31 +1372,26 @@ void sb::snowball_run()
     static constexpr bn::string_view howto[] = {
         "#Defend your fort!",
         "The family hides behind",
-        "the snow across the yard",
-        "and pops up to throw.",
+        "three snow piles: left,",
+        "middle and right. They",
+        "pop up to throw.",
         "",
         "#Throw",
-        "D-pad: aim.  A: throw.",
-        "Your snowball takes a",
-        "moment to get there:",
-        "aim where they'll be!",
-        "The aim turns red when",
-        "you're on someone.",
+        "< > pick a snow pile.",
+        "A: throw. Snowballs never",
+        "run out: hit them before",
+        "they throw! The aim turns",
+        "red when someone's there.",
         "",
         "#Duck",
         "Hold B to duck behind",
-        "your wall. Their snow-",
-        "balls splat on it, and",
-        "you pack new snowballs",
-        "(you can carry 6).",
+        "your wall: their snow-",
+        "balls splat on it.",
         "",
         "#Watch for",
         "Arms up and a ! means",
         "they're about to throw.",
-        "Hit their snowball in",
-        "the air: Intercept!",
-        "Far away and quick hits",
-        "score more.",
+        "Quick hits score more.",
         "",
         "#Waves",
         "Clear 5 waves to win.",
