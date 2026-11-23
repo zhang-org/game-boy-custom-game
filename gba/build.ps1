@@ -10,7 +10,13 @@ Set-Location $PSScriptRoot
 $dkp = if ($env:DEVKITPRO_WIN) { $env:DEVKITPRO_WIN } else { 'C:\devkitPro' }
 $make = Join-Path $dkp 'msys2\usr\bin\make.exe'
 if (-not (Test-Path $make)) { Write-Host "devkitPro not found in $dkp (see README: GBA game setup)"; exit 1 }
-if (-not (Test-Path 'butano\butano\butano.mak')) { git submodule update --init }
+if (-not (Test-Path 'butano\butano\butano.mak')) {
+    # git prints progress on stderr. With 'Stop', Windows PowerShell 5.1 can treat that as a fatal error, so relax it here.
+    $ErrorActionPreference = 'Continue'
+    git submodule update --init
+    $ErrorActionPreference = 'Stop'
+    if (-not (Test-Path 'butano\butano\butano.mak')) { Write-Host 'Could not download the Butano engine (git submodule update --init failed).'; exit 1 }
+}
 
 # devkitPro's tools expect these MSYS-style paths.
 if (-not $env:DEVKITPRO) { $env:DEVKITPRO = '/opt/devkitpro' }
@@ -18,8 +24,14 @@ if (-not $env:DEVKITARM) { $env:DEVKITARM = '/opt/devkitpro/devkitARM' }
 $env:PATH = "$dkp\msys2\usr\bin;$dkp\devkitARM\bin;$dkp\tools\bin;$env:PATH"
 
 $python = $null
+# Windows ships fake 'python'/'python3' shortcuts that only open the Microsoft Store, so check that each one really runs.
 foreach ($candidate in 'python', 'python3', 'py') {
-    if (Get-Command $candidate -ErrorAction SilentlyContinue) { $python = $candidate; break }
+    if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
+    $ErrorActionPreference = 'Continue'
+    $version = & $candidate --version 2>&1 | Out-String
+    $ok = ($LASTEXITCODE -eq 0) -and ($version -match 'Python 3')
+    $ErrorActionPreference = 'Stop'
+    if ($ok) { $python = $candidate; break }
 }
 if (-not $python) { Write-Host 'Python 3 not found. Install it from python.org (tick "Add to PATH").'; exit 1 }
 
