@@ -769,7 +769,7 @@ def main():
             oy += cv.frame_h + 2
         save_png(os.path.join(sys.argv[1], "catch_sprites.png"), overview, scale=4)
         save_png(os.path.join(sys.argv[1], "catch_bg.png"), previews[-1][1], scale=3)
-    print(f"Wrote Gift Catch art to {os.path.normpath(OUT)}")
+    print(f"Wrote Gift Tower art to {os.path.normpath(OUT)}")
 
 
 if __name__ == "__main__":
