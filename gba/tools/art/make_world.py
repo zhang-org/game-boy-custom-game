@@ -429,7 +429,7 @@ def paint_lights(c, px, py, w):
 def paint_roost(top, base):
     paint_house(top, 3, 3, WOOD, WOOD_D, wall=rgb("#c89060"), wall_d=WOOD_D, w=5, h=3)
     # sleigh in the yard (the reindeer are sprites, so they can move)
-    px, py = 8 * CELL + 2, 5 * CELL + 2
+    px, py = 8 * CELL + 2, 5 * CELL + 6
     base.ascii(px, py, [
         "o..........oo...",
         "orrrrrrrrrrrro..",
@@ -438,9 +438,6 @@ def paint_roost(top, base):
         "..oooooooooooo..",
         ".oYYYYYYYYYYYYo.",
     ], {"o": OUTL, "r": RED, "G": GOLD, "Y": GOLD})
-    # a wooden trough with hay for the reindeer
-    base.ascii(10 * CELL - 4, 4 * CELL + 6, [".oooooo.", "oWWWWWWo", "oDDDDDDo", ".oooooo."],
-               {"o": OUTL, "W": rgb("#e8c860"), "D": WOOD_D})
 
 
 def paint_workshop(c):
@@ -458,35 +455,46 @@ def paint_workshop(c):
 
 
 def paint_big_paddle(c, cx, cy):
-    """A giant paddle standing on the roof, seen from the front and a bit from the side (so it looks 3D)."""
+    """A giant table tennis bat standing on the roof, tilted a little, with a ball."""
     RUBBER, RUBBER_D, RUBBER_L = rgb("#e83838"), rgb("#a02030"), rgb("#ff9090")
-    # soft shadow on the roof
-    c.ellipse(cx + 5, cy + 27, 14, 3, rgb("#3868b0"))
-    # handle (behind the head), with grip bands
-    for i in range(18):
-        c.rect(cx - 3, cy + 10 + i, 7, 1, WOOD_L if i % 5 == 4 else WOOD)
-    c.vline(cx - 4, cy + 10, cy + 27, OUTL)
-    c.vline(cx + 4, cy + 10, cy + 27, OUTL)
-    c.hline(cx - 4, cx + 4, cy + 28, OUTL)
-    c.rect(cx - 3, cy + 25, 7, 3, WOOD_D)
-    # the paddle edge (thickness), offset down-right
-    c.ellipse(cx + 3, cy + 3, 15, 12, WOOD_D, OUTL)
-    # the red rubber face with a darker rim and a shiny highlight
-    c.ellipse(cx, cy, 15, 12, RUBBER, OUTL)
-    c.ellipse(cx, cy, 14, 11, RUBBER_D)
-    c.ellipse(cx, cy, 12, 9, RUBBER)
-    c.ellipse(cx - 5, cy - 4, 4, 2, RUBBER_L)
-    c.set(cx - 9, cy - 1, RUBBER_L)
+    TAPE = rgb("#303038")
+    # shadow on the roof
+    c.ellipse(cx + 4, cy + 30, 15, 3, rgb("#3868b0"))
+    # handle: flared wooden grip with the end cap
+    for i in range(16):
+        w = 3 + (i * 2) // 15            # gets a little wider towards the end (flare)
+        c.rect(cx - w, cy + 13 + i, 2 * w + 1, 1, WOOD_L if i % 5 == 4 else WOOD)
+        c.set(cx - w - 1, cy + 13 + i, OUTL)
+        c.set(cx + w + 1, cy + 13 + i, OUTL)
+    c.hline(cx - 6, cx + 6, cy + 29, OUTL)
+    c.rect(cx - 5, cy + 27, 11, 2, WOOD_D)
+    # throat: the wooden neck joining the blade and the handle
+    for i in range(6):
+        c.hline(cx - 8 + i, cx + 8 - i, cy + 8 + i, WOOD)
+        c.set(cx - 9 + i, cy + 8 + i, OUTL)
+        c.set(cx + 9 - i, cy + 8 + i, OUTL)
+    # blade edge (thickness): wood, offset down-right so it looks 3D
+    c.ellipse(cx + 3, cy + 3, 16, 13, WOOD_D, OUTL)
+    # blade: black edge tape, then red rubber with a shine
+    c.ellipse(cx, cy, 16, 13, TAPE, OUTL)
+    c.ellipse(cx, cy, 14, 11, RUBBER)
+    c.ellipse(cx, cy, 14, 11, RUBBER)
+    for dx in range(-12, 13):            # little bumps of the pimpled rubber
+        for dy in range(-9, 10):
+            if (dx + dy) % 4 == 0 and (dx * dx) / 169.0 + (dy * dy) / 100.0 < 0.8:
+                c.set(cx + dx, cy + dy, RUBBER_D)
+    c.ellipse(cx - 6, cy - 5, 4, 2, RUBBER_L)
+    c.set(cx - 10, cy - 1, RUBBER_L)
     # ball with a tiny shadow
-    c.ellipse(cx + 22, cy + 27, 3.5, 1.3, rgb("#3868b0"))
-    c.ellipse(cx + 22, cy - 6, 4, 4, SPARK, OUTL)
-    c.set(cx + 21, cy - 7, rgb("#c8d8f0"))
-    c.set(cx + 23, cy - 5, rgb("#c8d8f0"))
+    c.ellipse(cx + 23, cy + 30, 3.5, 1.3, rgb("#3868b0"))
+    c.ellipse(cx + 24, cy - 8, 4, 4, SPARK, OUTL)
+    c.set(cx + 23, cy - 9, rgb("#c8d8f0"))
+    c.set(cx + 25, cy - 7, rgb("#c8d8f0"))
 
 
 def paint_rec_hall(c):
     def sign(c, px, py, pw, ph):
-        paint_big_paddle(c, px + pw // 2 - 4, py - 2)
+        paint_big_paddle(c, px + pw // 2 - 6, py - 4)
         paint_lights(c, px + 4, py + ph // 2 - 1, pw - 8)
     paint_house(c, 23, 12, BLUE, BLUE_D, wall=rgb("#e8e0f0"), w=5, h=3, sign=sign)
     x0, x1, top, base = OBJECTS[-1]

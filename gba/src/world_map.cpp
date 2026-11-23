@@ -321,8 +321,8 @@ namespace sb
             bn::sprite_ptr horse = bn::sprite_items::world_horse.create_sprite(HORSE_X, HORSE_Y);
             horse.set_camera(camera);
             sort_sprite(horse, false);
-            bn::sprite_ptr reindeer_a = bn::sprite_items::world_reindeer.create_sprite(144 - HALF_MAP, 68 - HALF_MAP);
-            bn::sprite_ptr reindeer_b = bn::sprite_items::world_reindeer.create_sprite(174 - HALF_MAP, 74 - HALF_MAP);
+            bn::sprite_ptr reindeer_a = bn::sprite_items::world_reindeer.create_sprite(150 - HALF_MAP, 62 - HALF_MAP);
+            bn::sprite_ptr reindeer_b = bn::sprite_items::world_reindeer.create_sprite(176 - HALF_MAP, 72 - HALF_MAP);
             reindeer_b.set_horizontal_flip(true);
 
             reindeer_a.set_camera(camera);
@@ -530,7 +530,7 @@ namespace sb
                             // Leave a footprint behind if we are walking on fresh snow.
                             char here = layout_at(cell_x, cell_y);
 
-                            if(here == '.' || here == 'N' || here == 'P')
+                            if(here == '.' || here == 'N')      // fresh snow only (not the cobbled path, not doormats)
                             {
                                 int px = world_x(cell_x).right_shift_integer() + ((step_count & 1) ? 3 : -3) * (dx ? 0 : 1);
                                 int py = world_y(cell_y).right_shift_integer() + 10 + ((step_count & 1) ? 3 : -3) * (dx ? 1 : 0);
