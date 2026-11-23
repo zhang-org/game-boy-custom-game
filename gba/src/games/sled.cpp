@@ -13,6 +13,7 @@
 #include "bn_color.h"
 #include "bn_fixed.h"
 #include "bn_keypad.h"
+#include "bn_log.h"
 #include "bn_math.h"
 #include "bn_optional.h"
 #include "bn_regular_bg_ptr.h"
@@ -29,6 +30,7 @@
 #include "bn_sprite_items_sled_fx.h"
 #include "bn_sprite_items_sled_obstacles.h"
 #include "bn_sprite_items_sled_puff.h"
+#include "bn_sprite_items_sled_ramp.h"
 #include "bn_sprite_items_sled_sled.h"
 #include "bn_sprite_items_sled_track.h"
 
@@ -63,9 +65,9 @@ namespace
 
     constexpr course_def COURSES[3] = {
         //  name      length  gates      half  swing     ramp obst clear cruise seed
-        { "Easy",   4200,   280, 340,  26,   22, 44,   6,   1,   28,   2.0,  1201 },
-        { "Medium", 5300,   240, 300,  21,   30, 56,   4,   2,   22,   2.35, 7703 },
-        { "Hard",   6400,   200, 260,  17,   36, 66,   3,   3,   18,   2.7,  4419 },
+        { "Easy",   4200,   280, 340,  29,   22, 44,   6,   1,   28,   2.0,  1201 },
+        { "Medium", 5300,   240, 300,  24,   30, 56,   4,   2,   22,   2.35, 7703 },
+        { "Hard",   6400,   200, 260,  20,   36, 66,   3,   3,   18,   2.7,  4419 },
     };
     constexpr int COURSE_COUNT = 3;
 
@@ -80,7 +82,9 @@ namespace
     constexpr int AIR_FRAMES = 42;              // time in the air after a ramp
     constexpr int AIR_HEIGHT = 16;              // how high the sled flies
     constexpr bn::fixed RAMP_BONUS = 0.5;       // extra speed when you land
-    constexpr int RAMP_HALF = 13;               // hit the ramp within this many pixels of its middle
+    constexpr int RAMP_HALF = 20;               // hit the ramp within this many pixels of its middle (the art
+                                                // in make_sled.py: lip 36 px wide, foot 44 px)
+    constexpr int GATE_MARGIN = 0;              // the sled's middle must be this far inside the poles
 
     // Steering (sideways) physics: a little momentum so it feels like sliding on snow.
     constexpr bn::fixed STEER_ACCEL = bn::fixed(3) / 20;
@@ -108,7 +112,8 @@ namespace
     constexpr int PUFF_POOL = 8;
     constexpr int SNOWFLAKES = 12;
     constexpr int TRACK_STEP = 6;
-    constexpr int MAX_ITEMS = 300;
+    constexpr int MAX_ITEMS = 300;              // gates, obstacles, ramps, logs and the finish (Hard uses ~150).
+                                                // The trees along the edges are not stored: see edge_trees.
 
     // Records: sb_save extra record slots SLED_RECORD_SLOT .. +2 (Easy, Medium, Hard).
     constexpr int SLED_RECORD_SLOT = 3;
@@ -125,7 +130,7 @@ namespace
         IT_GATE, IT_RAMP, IT_LOG, IT_FINISH
     };
 
-    enum course_frame { CF_GATE_RED = 0, CF_GATE_BLUE, CF_RAMP, CF_LOG_L, CF_LOG_R, CF_SHADOW };
+    enum course_frame { CF_GATE_RED = 0, CF_GATE_BLUE, CF_LOG_L, CF_LOG_R, CF_SHADOW };
 
     struct hitbox
     {
@@ -178,6 +183,74 @@ namespace
         }
     };
 
+    // The trees along both edges of the course, made a pair at a time as the sled gets near them.
+    struct edge_trees
+    {
+        static constexpr int FIRST = 60;
+
+        course_random rnd;
+        int next_d = FIRST;             // distance of the next pair
+        int end_d = 0;
+        course_item pending[2];
+        int pending_count = 0;
+        int pending_index = 0;
+
+        void reset(const course_def& c)
+        {
+            rnd = { c.seed };
+            next_d = FIRST;
+            end_d = c.length + 120;
+            pending_count = 0;
+            pending_index = 0;
+        }
+
+        // The next tree, if it is within `ahead` of distance `travel`.
+        bool next(int travel, int ahead, course_item& out)
+        {
+            if(pending_index == pending_count)
+            {
+                if(next_d >= end_d)
+                {
+                    return false;
+                }
+
+                // 7 random numbers per pair, then 1 for the gap to the next pair (see skip()).
+                int left_x = -rnd.range(92, 104);
+                int left_type = rnd.range(0, 1) ? IT_PINE : IT_SNOWY_PINE;
+                int left_flip = rnd.range(0, 1);
+                int right_d = next_d + rnd.range(10, 30);
+                int right_x = rnd.range(92, 104);
+                int right_type = rnd.range(0, 1) ? IT_PINE : IT_SNOWY_PINE;
+                int right_flip = rnd.range(0, 1);
+                pending[0] = { next_d, short(left_x), char(left_type), char(left_flip) };
+                pending[1] = { right_d, short(right_x), char(right_type), char(right_flip) };
+                pending_count = 2;
+                pending_index = 0;
+                next_d += rnd.range(36, 64);
+            }
+
+            if(pending[pending_index].d - travel > ahead)
+            {
+                return false;
+            }
+
+            out = pending[pending_index++];
+            return true;
+        }
+
+        // Moves `rnd` past the random numbers the edge trees use (the course is laid out after them).
+        static void skip(const course_def& c, course_random& rnd)
+        {
+            for(int d = FIRST; d < c.length + 120; d += rnd.range(36, 64))
+            {
+                for(int i = 0; i < 7; ++i)
+                {
+                    rnd.range(0, 1);
+                }
+            }
+        }
+    };
+
     void build_course(int course, bn::vector<course_item, MAX_ITEMS>& items)
     {
         const course_def& c = COURSES[course];
@@ -185,10 +258,8 @@ namespace
         items.clear();
 
         auto add = [&](int d, int x, int type, int variant) {
-            if(! items.full())
-            {
-                items.push_back({ d, short(x), char(type), char(variant) });
-            }
+            BN_ASSERT(! items.full(), "Sled course ", course, " has more than MAX_ITEMS items");
+            items.push_back({ d, short(x), char(type), char(variant) });
         };
 
         auto pick_obstacle = [&]() {
@@ -201,12 +272,10 @@ namespace
         int gate = 0;
         int until_ramp = c.ramp_every;
 
-        // Trees along both edges the whole way down (they frame the course).
-        for(int td = 60; td < c.length + 120; td += rnd.range(36, 64))
-        {
-            add(td, -rnd.range(92, 104), rnd.range(0, 1) ? IT_PINE : IT_SNOWY_PINE, rnd.range(0, 1));
-            add(td + rnd.range(10, 30), rnd.range(92, 104), rnd.range(0, 1) ? IT_PINE : IT_SNOWY_PINE, rnd.range(0, 1));
-        }
+        // The trees along both edges are made while you ride (edge_trees), not stored: there are ~250 of
+        // them on Hard, which used to fill the list and cut the course off (no finish line). Skip the same
+        // random numbers here so every course keeps the layout it had before.
+        edge_trees::skip(c, rnd);
 
         while(d < c.length - 160)
         {
@@ -271,6 +340,7 @@ namespace
 
         (void) x;
         add(c.length, 0, IT_FINISH, 0);
+        BN_LOG("Sled course ", course, ": ", items.size(), " items, ", gate, " gates");
 
         // Sort by distance (insertion sort: a few hundred items, once per run).
         for(int i = 1; i < items.size(); ++i)
@@ -286,6 +356,8 @@ namespace
 
             items[j + 1] = key;
         }
+
+        BN_ASSERT(items.back().type == IT_FINISH, "Sled course ", course, " doesn't end with the finish line");
     }
 
     int count_gates(const bn::vector<course_item, MAX_ITEMS>& items)
@@ -317,7 +389,8 @@ namespace
     struct world_obj
     {
         bn::optional<bn::sprite_ptr> a, b;
-        int item = -1;
+        course_item it = {};    // a copy (edge trees are not in the course list)
+        bool active = false;
         bn::fixed y;
         bool checked = false;   // gates and ramps: already passed the sled
     };
@@ -385,6 +458,7 @@ namespace
             build_course(course, _items);
             _total_gates = count_gates(_items);
             _next_item = 0;
+            _edge_waiting = false;
             _x = 0;
             _vx = 0;
             _speed = 0;
@@ -408,8 +482,10 @@ namespace
             {
                 o.a.reset();
                 o.b.reset();
-                o.item = -1;
+                o.active = false;
             }
+
+            _edges.reset(def());
 
             for(track& t : _tracks)
             {
@@ -511,6 +587,9 @@ namespace
         bn::sprite_ptr _fx;
         sb::snowfall _snow;
         bn::vector<course_item, MAX_ITEMS> _items;
+        edge_trees _edges;
+        course_item _edge_item = {};
+        bool _edge_waiting = false;
         bn::vector<world_obj, OBJECT_POOL> _objects;
         bn::vector<track, TRACK_POOL> _tracks;
         bn::vector<puff, PUFF_POOL> _puffs;
@@ -618,6 +697,23 @@ namespace
         {
             bool left = bn::keypad::left_held();
             bool right = bn::keypad::right_held();
+
+#ifdef SLED_AUTOPILOT
+            // Test builds only (make USERFLAGS=-DSLED_AUTOPILOT): steers for the middle of the next gate or
+            // ramp, so the harness can ride a whole course. It does not dodge obstacles.
+            for(int i = 0; i < _items.size(); ++i)
+            {
+                const course_item& it = _items[i];
+
+                if((it.type == IT_GATE || it.type == IT_RAMP || it.type == IT_FINISH) && it.d > _travel + 4)
+                {
+                    bn::fixed ahead = _x + _vx * 8;     // where the slide takes us
+                    left = ahead > it.x + 2;
+                    right = ahead < it.x - 2;
+                    break;
+                }
+            }
+#endif
             bn::fixed grip = tucking() ? TUCK_STEER : braking() ? BRAKE_STEER : bn::fixed(1);
 
             if(_air > 0)
@@ -685,19 +781,19 @@ namespace
 
             for(world_obj& o : _objects)
             {
-                if(o.item < 0)
+                if(! o.active)
                 {
                     continue;
                 }
 
-                const course_item& it = _items[o.item];
+                const course_item& it = o.it;
                 o.y = screen_y(it.d);
 
                 if(o.y < DESPAWN_Y)
                 {
                     o.a.reset();
                     o.b.reset();
-                    o.item = -1;
+                    o.active = false;
                     continue;
                 }
 
@@ -794,26 +890,61 @@ namespace
 
         void spawn_items()
         {
-            while(_next_item < _items.size() && _items[_next_item].d - _travel <= SPAWN_AHEAD)
-            {
-                world_obj* slot = nullptr;
+            int travel = _travel.integer();
 
-                for(world_obj& o : _objects)
+            while(_next_item < _items.size() && _items[_next_item].d - travel <= SPAWN_AHEAD)
+            {
+                if(! spawn(_items[_next_item]))
                 {
-                    if(o.item < 0)
+                    return;     // no free slot: try again next frame
+                }
+
+                ++_next_item;
+            }
+
+            while(true)
+            {
+                if(! _edge_waiting)
+                {
+                    if(! _edges.next(travel, SPAWN_AHEAD, _edge_item))
                     {
-                        slot = &o;
                         break;
                     }
+
+                    _edge_waiting = true;
                 }
 
-                if(! slot)
+                if(! spawn(_edge_item))
                 {
-                    return;     // try again next frame
+                    break;
                 }
 
-                const course_item& it = _items[_next_item];
-                slot->item = _next_item;
+                _edge_waiting = false;
+            }
+        }
+
+        // Puts a course item on screen. Returns false if all the object slots are in use.
+        bool spawn(const course_item& it)
+        {
+            world_obj* slot = nullptr;
+
+            for(world_obj& o : _objects)
+            {
+                if(! o.active)
+                {
+                    slot = &o;
+                    break;
+                }
+            }
+
+            if(! slot)
+            {
+                return false;
+            }
+
+            {
+                slot->it = it;
+                slot->active = true;
                 slot->checked = false;
 
                 switch(it.type)
@@ -826,7 +957,7 @@ namespace
                     break;
                 }
                 case IT_RAMP:
-                    slot->a = make_sprite(bn::sprite_items::sled_course, CF_RAMP);
+                    slot->a = make_sprite(bn::sprite_items::sled_ramp, 0);
                     break;
                 case IT_LOG:
                     slot->a = make_sprite(bn::sprite_items::sled_course, CF_LOG_L);
@@ -844,8 +975,9 @@ namespace
 
                 slot->y = screen_y(it.d);
                 place_object(*slot, it);
-                ++_next_item;
             }
+
+            return true;
         }
 
         void spawn_puff(bn::fixed x, int direction)
@@ -923,12 +1055,12 @@ namespace
 
             for(world_obj& o : _objects)
             {
-                if(o.item < 0)
+                if(! o.active)
                 {
                     continue;
                 }
 
-                const course_item& it = _items[o.item];
+                const course_item& it = o.it;
                 int oy = o.y.integer();
 
                 switch(it.type)
@@ -939,7 +1071,7 @@ namespace
                     {
                         o.checked = true;
 
-                        if(bn::abs(_x - it.x) < def().gate_half - 2)
+                        if(bn::abs(_x - it.x) < def().gate_half - GATE_MARGIN)
                         {
                             ++_gates_passed;
                             sb::sfx(bn::sound_items::sfx_select);
