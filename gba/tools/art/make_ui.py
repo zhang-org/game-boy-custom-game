@@ -261,7 +261,10 @@ def save_logo():
     red, dark, white, snow_s = rgb("#e03838"), rgb("#702030"), rgb("#f8f8f8"), rgb("#c8d8f0")
     green, gold = rgb("#30a050"), rgb("#f8d040")
     c = Canvas(256, 256)
-    text = "Snowberry"
+    # THE GAME'S NAME lives in tools/art/game_title.txt (one line). Change it there and re-run this script.
+    # (The name inside the ROM file itself is ROMTITLE in the Makefile, max 12 capital letters.)
+    with open(os.path.join(os.path.dirname(__file__), "game_title.txt")) as f:
+        text = f.read().strip()
     scale = 3
     x = 0
     widths = [glyph_width(ch) - 1 for ch in text]
