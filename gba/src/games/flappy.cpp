@@ -58,13 +58,16 @@ namespace
     constexpr bn::fixed FLAP_SPEED = -2.7;         // vertical speed right after a flap (negative = up): more negative = bigger hop
     constexpr bn::fixed MAX_FALL_SPEED = 3.3;      // pixels/frame: the fastest the reindeer can drop
     constexpr int PLAYER_X = -56;                  // screen x of the reindeer (fixed; the world scrolls past)
-    constexpr int CEILING_Y = -60;                 // reindeer can't fly higher than this (no penalty, it just stops)
-    constexpr int GROUND_Y = 58;                   // screen y of the snowy rooftops: touching it = game over
+    constexpr int CEILING_Y = -70;                 // reindeer can't fly higher than this (no penalty, it just stops)
+    constexpr int GROUND_Y = 66;                   // screen y of the snowy rooftops: touching it = game over
+    constexpr int GROUND_SHIFT = 8;                // the rooftops and skyline are drawn this much lower than in the art
+    // "Zoomed out": the reindeer and rider are drawn smaller, so there is more room to fly up and down.
+    constexpr bn::fixed PLAYER_SCALE = 0.8;
 
     // Grace hitbox around the reindeer's centre (smaller than the art, so near misses count as misses)
-    constexpr int HIT_HALF_W = 8;                  // pixels left/right of centre
-    constexpr int HIT_TOP = 13;                    // pixels above centre (the rider's hat can poke into clouds)
-    constexpr int HIT_BOTTOM = 6;                  // pixels below centre (hooves can dip into chimney snow)
+    constexpr int HIT_HALF_W = 6;                  // pixels left/right of centre
+    constexpr int HIT_TOP = 10;                    // pixels above centre (the rider's hat can poke into clouds)
+    constexpr int HIT_BOTTOM = 5;                  // pixels below centre (hooves can dip into chimney snow)
     constexpr int OBSTACLE_HALF_W = 11;            // collision half width of chimneys and clouds (art is 12-15)
 
     // Scrolling and obstacles: it starts brisk and keeps getting faster, with tighter gaps
@@ -72,17 +75,18 @@ namespace
     constexpr bn::fixed SCROLL_STEP = 0.13;        // added to the scroll speed every SPEEDUP_EVERY gaps
     constexpr bn::fixed MAX_SCROLL = 2.5;          // scroll speed never goes above this
     constexpr int SPEEDUP_EVERY = 10;              // gaps between speed-ups (also when the city changes)
-    constexpr int START_GAP = 66;                  // pixels of open air between top and bottom obstacle at the start
+    constexpr int START_GAP = 60;                  // pixels of open air between top and bottom obstacle at the start
     constexpr int GAP_STEP = 3;                    // gap gets this much smaller at every speed-up
-    constexpr int MIN_GAP = 50;                    // the gap never gets smaller than this ...
+    constexpr int MIN_GAP = 46;                    // the gap never gets smaller than this ...
     constexpr int TIGHT_EVERY = 4;                 // ... except every 4th column, which is tighter still:
     constexpr int TIGHT_SHRINK = 8;                //     this many pixels smaller
-    constexpr int TIGHTEST_GAP = 44;               //     but never below this
+    constexpr int TIGHTEST_GAP = 40;               //     but never below this
     constexpr int COLUMN_SPACING = 112;            // pixels between obstacle columns: bigger = more time to react
     constexpr int FIRST_COLUMN_X = 190;            // where the first column starts (screen right edge is 120)
-    constexpr int MAX_GAP_SHIFT = 36;              // max up/down jump of the gap between neighbouring columns
-    constexpr int MIN_CLOUD = 8;                   // a top cloud always reaches at least this far into the screen
-    constexpr int MIN_CHIMNEY = 10;                // a chimney always sticks up at least this far above the roofs
+    constexpr int MAX_GAP_SHIFT = 62;              // max up/down jump of the gap between neighbouring columns ...
+    constexpr int MIN_GAP_SHIFT = 22;              // ... and at least this much whenever there is room (big height changes)
+    constexpr int MIN_CLOUD = 4;                   // a top cloud always reaches at least this far into the screen
+    constexpr int MIN_CHIMNEY = 6;                 // a chimney always sticks up at least this far above the roofs
 
     // Candy canes: bonus points in risky spots (right next to a cloud or a chimney)
     constexpr int CANDY_CHANCE = 0;                // % of columns that have one (0 = switched off for now)
@@ -321,9 +325,35 @@ namespace
     {
         int lo = gap_centre_range_lo(gap);
         int hi = gap_centre_range_hi(gap);
-        int from = bn::max(lo, s.last_gap_centre - MAX_GAP_SHIFT);
-        int to = bn::min(hi, s.last_gap_centre + MAX_GAP_SHIFT);
-        int centre = from >= to ? (lo + hi) / 2 : sb::rand_range(from, to);
+        int last = bn::max(lo, bn::min(hi, s.last_gap_centre));
+        int up_room = bn::min(last - lo, MAX_GAP_SHIFT);       // how far the gap can move up ...
+        int down_room = bn::min(hi - last, MAX_GAP_SHIFT);     // ... and down
+        bool go_up = sb::rand_range(0, 1) == 0;
+
+        if(go_up && up_room < MIN_GAP_SHIFT)
+        {
+            go_up = false;
+        }
+        else if(! go_up && down_room < MIN_GAP_SHIFT)
+        {
+            go_up = true;
+        }
+
+        int centre;
+
+        if(go_up && up_room >= MIN_GAP_SHIFT)
+        {
+            centre = last - sb::rand_range(MIN_GAP_SHIFT, up_room);
+        }
+        else if(! go_up && down_room >= MIN_GAP_SHIFT)
+        {
+            centre = last + sb::rand_range(MIN_GAP_SHIFT, down_room);
+        }
+        else
+        {
+            centre = sb::rand_range(lo, hi);
+        }
+
         s.last_gap_centre = centre;
         return centre;
     }
@@ -377,11 +407,11 @@ void sb::flappy_run()
     bn::bg_palettes::set_transparent_color(bn::color(2, 3, 8));
     bn::regular_bg_ptr sky = bn::regular_bg_items::flappy_sky.create_bg(0, 0);
     sky.set_priority(3);
-    bn::regular_bg_ptr town = bn::regular_bg_items::flappy_city_stl.create_bg(0, 0);
+    bn::regular_bg_ptr town = bn::regular_bg_items::flappy_city_stl.create_bg(0, GROUND_SHIFT);
     town.set_priority(2);
     tour_order tour;
     int city_fade = 0;       // counts down while the skyline changes (fade out, swap, fade in)
-    bn::regular_bg_ptr roofs = bn::regular_bg_items::flappy_roofs.create_bg(0, 0);
+    bn::regular_bg_ptr roofs = bn::regular_bg_items::flappy_roofs.create_bg(0, GROUND_SHIFT);
     roofs.set_priority(1);
 
     bn::sprite_ptr moon = bn::sprite_items::flappy_moon.create_sprite(78, -52);
@@ -395,6 +425,7 @@ void sb::flappy_run()
     rider.set_bg_priority(1);
     rider.set_z_order(-1);  // in front of the reindeer
     bn::sprite_affine_mat_ptr tilt = bn::sprite_affine_mat_ptr::create();
+    tilt.set_scale(PLAYER_SCALE);
     reindeer.set_affine_mat(tilt);
     rider.set_affine_mat(tilt);
 
@@ -412,8 +443,8 @@ void sb::flappy_run()
         // Rotate the rider's seat offset with the reindeer (screen y points down, angle turns counterclockwise).
         bn::fixed s = bn::degrees_lut_sin(angle < 0 ? angle + 360 : angle);
         bn::fixed c = bn::degrees_lut_cos(angle < 0 ? angle + 360 : angle);
-        bn::fixed ox = c * RIDER_DX + s * RIDER_DY;
-        bn::fixed oy = c * RIDER_DY - s * RIDER_DX;
+        bn::fixed ox = (c * RIDER_DX + s * RIDER_DY) * PLAYER_SCALE;
+        bn::fixed oy = (c * RIDER_DY - s * RIDER_DX) * PLAYER_SCALE;
         rider.set_position(PLAYER_X + ox, y + oy);
     };
 
