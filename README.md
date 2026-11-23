@@ -23,6 +23,7 @@ A Game Boy Advance collection of six winter mini games starring the family, play
 1. Install devkitPro with the graphical installer from https://github.com/devkitPro/installer/releases (tick **GBA Development**). Keep the default folder `C:\devkitPro`.
 2. Install Python 3 from python.org and tick "Add python.exe to PATH".
 3. mGBA: `winget install --id JeffreyPfau.mGBA -e`
+4. The project folder's path must not contain a space (the build tools break on it). If yours does (e.g. `Documents\GB Game`), give the folder a drive letter first and build from there: `subst G: "C:\Users\you\Documents\GB Game"` then `G:\gba\build.ps1`.
 
 **Both:** after cloning, fetch Butano once: `git submodule update --init` (the build scripts also do this for you).
 
@@ -43,7 +44,9 @@ The first build compiles Butano and takes a minute or two; after that it takes a
 - The starting art was drawn by the Python scripts in `gba/tools/art/` (characters, town map, font and text boxes, one script per mini game). Re-running a script overwrites its BMPs, so once you hand-draw a file, stop regenerating it.
 - Characters: `gba/graphics/characters/chr_<name>.bmp`, 12 frames of 16x32 (frame order in `gba/include/sb_characters.h`). To change someone's hair, clothes or hat, edit their line in `gba/tools/art/make_characters.py` and run it.
 - Music: songs are written as note text in `gba/tools/music/songs.py`; sound effects are recipes in `gba/tools/music/make_audio.py`. Run `python3 gba/tools/music/make_audio.py` to regenerate `gba/audio/`.
-- The town layout (where things are, what you can walk on) is in `gba/tools/art/make_world.py`.
+- The town layout (where things are, what you can walk on) is in `gba/tools/art/make_world.py`. It draws two pictures (the ground and a "top" layer with trees, houses and lamps, so people can walk behind them) and writes `gba/include/sb_world_layout.h`.
+- The horse, reindeer and snow footprints on the map are sprites: `gba/tools/art/make_world_sprites.py`. The opening scene (family photo by the tree) is `gba/tools/art/make_title.py` and `gba/src/scenes.cpp`.
+- **The game's name** (title screen): edit the one line in `gba/tools/art/game_title.txt`, then run `python3 gba/tools/art/make_ui.py` and rebuild. The name inside the ROM file is `ROMTITLE` in `gba/Makefile` (12 capital letters at most).
 - Every mini game keeps its difficulty numbers as named constants at the top of `gba/src/games/<game>.cpp`.
 
 ## Testing without watching the screen (optional, Mac)

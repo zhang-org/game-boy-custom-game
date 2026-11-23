@@ -61,29 +61,31 @@ def build_layout():
 
     # Main paths: a ring road and a cross through the square.
     fill(4, 17, 27, 17, ":")       # east-west road
-    fill(15, 6, 16, 27, ":")       # north-south avenue (2 wide)
+    fill(14, 6, 16, 27, ":")       # north-south avenue (3 wide, centred on x=15)
     fill(5, 7, 26, 7, ":")         # northern lane
     fill(5, 7, 5, 17, ":")
     fill(26, 7, 26, 17, ":")
     fill(9, 17, 9, 21, ":")        # to the pond
-    fill(16, 17, 24, 17, ":")
+    fill(17, 17, 24, 17, ":")
     fill(22, 20, 27, 20, ":")      # to the houses
     fill(22, 17, 22, 20, ":")
     # Town square around the big tree.
-    fill(12, 10, 19, 16, ":")
+    fill(12, 10, 18, 16, ":")
 
     # Places (footprints are drawn by STAMPS below).
-    fill(3, 3, 6, 5, "B")          # Reindeer Roost barn
-    fill(7, 4, 8, 5, "B")          # reindeer + sleigh
+    fill(3, 3, 7, 5, "B")          # Reindeer Roost barn (5 wide: the door is in the middle cell, x=5)
+    fill(8, 4, 10, 5, "B")         # reindeer yard + sleigh (the reindeer are sprites, see world_map.cpp)
     g[6][5] = "1"
-    fill(13, 3, 18, 5, "B")        # Toy Workshop
+    fill(12, 3, 18, 5, "B")        # Toy Workshop (7 wide: door in the middle cell, x=15)
     g[6][15] = "4"
     fill(22, 2, 28, 6, "B")        # Big Hill
     g[7][25] = "3"
-    fill(3, 12, 6, 14, "B")        # Stable
+    fill(3, 12, 7, 14, "B")        # Stable (5 wide: door in the middle cell, x=5)
     g[15][5] = "6"
-    fill(7, 12, 10, 15, "#")       # paddock fence
-    fill(8, 13, 9, 14, "B")        # horse in the paddock
+    fill(8, 12, 11, 15, "#")       # paddock fence (open at the bottom: you walk up to the horse)
+    fill(9, 13, 10, 14, "H")       # the horse (a sprite, see world_map.cpp)
+    g[15][9] = "."
+    g[15][10] = "."
     fill(23, 12, 27, 14, "B")      # Rec Hall
     g[15][25] = "2"
     for y in range(22, 28):        # Frozen Pond
@@ -92,17 +94,17 @@ def build_layout():
             if dx * dx + dy * dy <= 1.0:
                 g[y][x] = "~"
     g[21][9] = "5"
-    fill(15, 11, 16, 13, "B")      # Christmas tree
+    fill(14, 11, 16, 13, "B")      # Christmas tree (3 wide: you can stand next to its middle)
 
     # Homes, lamps, decorations.
     fill(20, 22, 22, 24, "B")
     fill(25, 22, 27, 24, "B")
     fill(23, 26, 25, 28, "B")
-    for x, y in ((14, 9), (17, 9), (14, 16), (17, 16), (6, 18), (25, 18)):
+    for x, y in LAMPS:
         g[y][x] = "B"              # lamp posts
-    for x, y in ((12, 13), (19, 13)):
+    for x, y in BENCHES:
         g[y][x] = "B"              # benches
-    for x, y in ((11, 15), (19, 21), (8, 9)):
+    for x, y in SNOWMEN:
         g[y][x] = "B"              # snowmen
     for x, y in ((17, 4 + 2), (13, 6)):
         pass
@@ -111,15 +113,27 @@ def build_layout():
             g[y][x] = "o"
     fill(11, 6, 11, 6, "B")         # present pile by the workshop
     fill(19, 6, 19, 6, "B")
+    g[6][5] = "1"
 
     # People and start.
-    for x, y in ((7, 8), (20, 8), (24, 9), (4, 16), (13, 15), (18, 12), (11, 21), (24, 19), (20, 25), (7, 19)):
+    for x, y, _fav in NPC_SPOTS:
         g[y][x] = "N"
     g[18][15] = "P"
     return g
 
 
-STAMPS = []  # (kind, cell_x, cell_y) filled in paint()
+LAMPS = ((13, 9), (17, 9), (13, 16), (17, 16), (6, 18), (25, 18))
+BENCHES = ((12, 13), (18, 13))
+SNOWMEN = ((12, 19), (19, 21), (8, 9))
+# Where the family stands: (cell x, cell y, favourite place or None). Listed in reading order; the
+# game gives the people with a favourite their own spot (Billy loves fishing, Ella and Alyssa horses).
+NPC_SPOTS = ((7, 8, None), (20, 8, None), (24, 9, None), (18, 12, None), (4, 16, "Ella"), (7, 16, "Alyssa"),
+             (7, 19, None), (11, 21, "Billy"), (24, 19, None), (20, 25, None))
+
+# Everything that can stand in front of or behind a person goes on the "top" layer (see paint()).
+# These are its bounding boxes in map pixels: (x0, x1, top, base). "base" is the line on the ground:
+# people standing lower than it are drawn in front, people standing higher are drawn behind.
+OBJECTS = []
 
 
 # ----------------------------------------------------------------------------- painters
@@ -179,6 +193,7 @@ def paint_doorstep(c, x, y):
 def paint_tree(c, x, y, top=0):
     """Pine tree in a cell; its crown pokes 8px into the cell above."""
     px, py = x * CELL, y * CELL - 8 + top
+    OBJECTS.append((x * CELL + 1, x * CELL + 15, y * CELL - 8, y * CELL + CELL))
     rows = [
         ".......o........",
         "......oLo.......",
@@ -277,6 +292,7 @@ def paint_rock(c, x, y):
 
 def paint_lamp(c, x, y):
     px, py = x * CELL, y * CELL - 12
+    OBJECTS.append((x * CELL + 5, x * CELL + 11, y * CELL - 12, y * CELL + CELL))
     c.ascii(px, py, [
         "......oooo......",
         ".....oYYYYo.....",
@@ -319,6 +335,7 @@ def paint_bench(c, x, y):
 
 def paint_snowman(c, x, y):
     px, py = x * CELL, y * CELL - 10
+    OBJECTS.append((x * CELL + 2, x * CELL + 14, y * CELL - 10, y * CELL + CELL))
     c.ascii(px, py, [
         "......oooo......",
         ".....okkkko.....",
@@ -359,6 +376,7 @@ def paint_presents(c, x, y):
 def paint_house(c, cx, cy, roof, roof_d, wall=WALL, wall_d=WALL_D, w=3, h=3, door=True, sign=None):
     """A cottage occupying w x h cells, roof with snow, door at the bottom middle."""
     px, py, pw, ph = cx * CELL, cy * CELL - 8, w * CELL, h * CELL + 8
+    OBJECTS.append((px, px + pw, py - 7, py + ph))
     roof_h = ph // 2 + 2
     # roof
     for i in range(roof_h):
@@ -408,28 +426,11 @@ def paint_lights(c, px, py, w):
         c.set(px + i + 2, py + 2, cols[(i // 4) % 4])
 
 
-def paint_roost(c):
-    paint_house(c, 3, 3, WOOD, WOOD_D, wall=rgb("#c89060"), wall_d=WOOD_D, w=4, h=3)
-    # reindeer
-    px, py = 7 * CELL, 4 * CELL - 6
-    c.ascii(px, py, [
-        "...d.d..........",
-        "...dd.d.........",
-        "....dd..........",
-        "....oBBo........",
-        "...oBBkBo.......",
-        "...oBBBBBo......",
-        "...rBBo.oBBBBBBo",
-        "....oo..oBBBBBBBo",
-        ".........oBBBBBBo",
-        ".........oBLBBLBo",
-        ".........oB.oB.oB",
-        ".........oB..B..B",
-        ".........ok..k..k",
-    ], {"d": BROWN_L, "o": OUTL, "B": BROWN, "k": BLACK, "r": RED, "L": BROWN_L})
-    # sleigh
-    px, py = 7 * CELL + 2, 5 * CELL + 2
-    c.ascii(px, py, [
+def paint_roost(top, base):
+    paint_house(top, 3, 3, WOOD, WOOD_D, wall=rgb("#c89060"), wall_d=WOOD_D, w=5, h=3)
+    # sleigh in the yard (the reindeer are sprites, so they can move)
+    px, py = 8 * CELL + 2, 5 * CELL + 2
+    base.ascii(px, py, [
         "o..........oo...",
         "orrrrrrrrrrrro..",
         "orrGrrrrrrGrro..",
@@ -437,6 +438,9 @@ def paint_roost(c):
         "..oooooooooooo..",
         ".oYYYYYYYYYYYYo.",
     ], {"o": OUTL, "r": RED, "G": GOLD, "Y": GOLD})
+    # a wooden trough with hay for the reindeer
+    base.ascii(10 * CELL - 4, 4 * CELL + 6, [".oooooo.", "oWWWWWWo", "oDDDDDDo", ".oooooo."],
+               {"o": OUTL, "W": rgb("#e8c860"), "D": WOOD_D})
 
 
 def paint_workshop(c):
@@ -450,17 +454,43 @@ def paint_workshop(c):
         c.vline(px + pw // 2, py + 9, py + 18, GOLD)
         c.hline(px + pw // 2 - 7, px + pw // 2 + 6, py + 13, GOLD)
         paint_lights(c, px + 4, py + ph // 2 - 1, pw - 8)
-    paint_house(c, 13, 3, GREEN, GREEN_D, wall=rgb("#f8d8b0"), w=6, h=3, sign=sign)
+    paint_house(c, 12, 3, GREEN, GREEN_D, wall=rgb("#f8d8b0"), w=7, h=3, sign=sign)
+
+
+def paint_big_paddle(c, cx, cy):
+    """A giant paddle standing on the roof, seen from the front and a bit from the side (so it looks 3D)."""
+    RUBBER, RUBBER_D, RUBBER_L = rgb("#e83838"), rgb("#a02030"), rgb("#ff9090")
+    # soft shadow on the roof
+    c.ellipse(cx + 5, cy + 27, 14, 3, rgb("#3868b0"))
+    # handle (behind the head), with grip bands
+    for i in range(18):
+        c.rect(cx - 3, cy + 10 + i, 7, 1, WOOD_L if i % 5 == 4 else WOOD)
+    c.vline(cx - 4, cy + 10, cy + 27, OUTL)
+    c.vline(cx + 4, cy + 10, cy + 27, OUTL)
+    c.hline(cx - 4, cx + 4, cy + 28, OUTL)
+    c.rect(cx - 3, cy + 25, 7, 3, WOOD_D)
+    # the paddle edge (thickness), offset down-right
+    c.ellipse(cx + 3, cy + 3, 15, 12, WOOD_D, OUTL)
+    # the red rubber face with a darker rim and a shiny highlight
+    c.ellipse(cx, cy, 15, 12, RUBBER, OUTL)
+    c.ellipse(cx, cy, 14, 11, RUBBER_D)
+    c.ellipse(cx, cy, 12, 9, RUBBER)
+    c.ellipse(cx - 5, cy - 4, 4, 2, RUBBER_L)
+    c.set(cx - 9, cy - 1, RUBBER_L)
+    # ball with a tiny shadow
+    c.ellipse(cx + 22, cy + 27, 3.5, 1.3, rgb("#3868b0"))
+    c.ellipse(cx + 22, cy - 6, 4, 4, SPARK, OUTL)
+    c.set(cx + 21, cy - 7, rgb("#c8d8f0"))
+    c.set(cx + 23, cy - 5, rgb("#c8d8f0"))
 
 
 def paint_rec_hall(c):
     def sign(c, px, py, pw, ph):
-        # ping pong paddle sign
-        c.ellipse(px + pw // 2, py + 14, 6, 6, RED, OUTL)
-        c.rect(px + pw // 2 - 1, py + 19, 3, 5, WOOD_D)
-        c.set(px + pw // 2 + 6, py + 9, SPARK)
+        paint_big_paddle(c, px + pw // 2 - 4, py - 2)
         paint_lights(c, px + 4, py + ph // 2 - 1, pw - 8)
     paint_house(c, 23, 12, BLUE, BLUE_D, wall=rgb("#e8e0f0"), w=5, h=3, sign=sign)
+    x0, x1, top, base = OBJECTS[-1]
+    OBJECTS[-1] = (x0, x1, top - 12, base)      # the paddle sticks up above the roof
 
 
 def paint_stable(c):
@@ -473,23 +503,17 @@ def paint_stable(c):
             c.set(dx + 1 + i, dy + 1 + i, SNOW)
             c.set(dx + 18 - i, dy + 1 + i, SNOW)
         c.vline(dx + 10, dy + 1, dy + 19, OUTL)
-    paint_house(c, 3, 12, RED_D, OUTL, wall=RED, wall_d=RED_D, w=4, h=3, door=False, sign=sign)
-    # horse in the paddock
-    px, py = 8 * CELL, 13 * CELL + 2
-    c.ascii(px, py, [
-        "..............o.",
-        ".............oBo",
-        "............oBkBo",
-        "...........oMBBBo",
-        "..oooooooooMBBo.",
-        ".oBBBBBBBBBBBo..",
-        "oMBBBBBBBBBBBo..",
-        "oMBBBBBBBBBBo...",
-        ".oBBBBBBBBBBo...",
-        ".oBo.oBo.oBo....",
-        ".oBo.oBo.oBo....",
-        ".oko.oko.oko....",
-    ], {"o": OUTL, "B": BROWN_L, "k": BLACK, "M": WOOD_D})
+    paint_house(c, 3, 12, RED_D, OUTL, wall=RED, wall_d=RED_D, w=5, h=3, door=False, sign=sign)
+
+
+def paint_paddock_ground(c):
+    """Trampled hay under the horse (the horse itself is a sprite)."""
+    for y in range(13 * CELL, 15 * CELL):
+        for x in range(9 * CELL, 11 * CELL):
+            if cell_hash(x, y) % 7 == 0:
+                c.set(x, y, rgb("#d8c080"))
+            elif cell_hash(x, y) % 11 == 0:
+                c.set(x, y, SNOW_D)
 
 
 def paint_hill(c):
@@ -534,8 +558,9 @@ def paint_pond_extras(c):
 
 
 def paint_christmas_tree(c):
-    px, py = 15 * CELL, 11 * CELL - 14
+    px, py = 15 * CELL + 8 - 16, 11 * CELL - 14    # centred on the middle cell (x=15, i.e. cells 14..16)
     w = 32
+    OBJECTS.append((px, px + w, py, 14 * CELL))
     for i in range(48):
         half = 2 + i * 13 // 48
         if i % 12 > 9:
@@ -568,7 +593,10 @@ def paint_christmas_tree(c):
 
 
 def paint(g):
+    """Returns (base, top). `base` is the ground; `top` holds everything people can walk in front of or
+    behind (trees, houses, lamps, snowmen), drawn over the people who stand behind it (see world_map.cpp)."""
     c = Canvas(N * CELL, N * CELL)
+    top = Canvas(N * CELL, N * CELL)
     # 1. ground
     for y in range(N):
         for x in range(N):
@@ -583,8 +611,9 @@ def paint(g):
         for x in range(N):
             if g[y][x] in "123456":
                 paint_doorstep(c, x, y)
-    # 2. objects, back to front (top rows first so lower things overlap upper ones)
+    # 2. low things on the ground layer
     paint_hill(c)
+    paint_paddock_ground(c)
     for y in range(N):
         for x in range(N):
             ch = g[y][x]
@@ -592,28 +621,29 @@ def paint(g):
                 paint_fence(c, g, x, y)
             elif ch == "o":
                 paint_rock(c, x, y)
-    paint_roost(c)
-    paint_workshop(c)
-    paint_stable(c)
-    paint_rec_hall(c)
     paint_pond_extras(c)
-    paint_house(c, 20, 22, RED, RED_D)
-    paint_house(c, 25, 22, PURPLE, rgb("#603890"), wall=rgb("#f8e8d8"))
-    paint_house(c, 23, 26, BLUE, BLUE_D, wall=rgb("#e8f0f8"))
-    paint_christmas_tree(c)
-    for x, y in ((14, 9), (17, 9), (14, 16), (17, 16), (6, 18), (25, 18)):
-        paint_lamp(c, x, y)
-    for x, y in ((12, 13), (19, 13)):
+    for x, y in BENCHES:
         paint_bench(c, x, y)
-    for x, y in ((11, 15), (19, 21), (8, 9)):
-        paint_snowman(c, x, y)
     for x, y in ((11, 6), (19, 6)):
         paint_presents(c, x, y)
+    # 3. tall things on the top layer
+    paint_roost(top, c)
+    paint_workshop(top)
+    paint_stable(top)
+    paint_rec_hall(top)
+    paint_house(top, 20, 22, RED, RED_D)
+    paint_house(top, 25, 22, PURPLE, rgb("#603890"), wall=rgb("#f8e8d8"))
+    paint_house(top, 23, 26, BLUE, BLUE_D, wall=rgb("#e8f0f8"))
+    paint_christmas_tree(top)
+    for x, y in LAMPS:
+        paint_lamp(top, x, y)
+    for x, y in SNOWMEN:
+        paint_snowman(top, x, y)
     for y in range(N):
         for x in range(N):
             if g[y][x] == "T":
-                paint_tree(c, x, y)
-    return c
+                paint_tree(top, x, y)
+    return c, top
 
 
 def count_tiles(c):
@@ -628,33 +658,65 @@ def count_tiles(c):
     return len(seen)
 
 
+def walkable(ch):
+    return ch in ".:123456NP"
+
+
 def write_layout_header(g):
     lines = ["// Generated by tools/art/make_world.py: the town map layout (32x32 cells of 16x16 px).",
              "// See that script for what each character means.",
-             "#ifndef SB_WORLD_LAYOUT_H", "#define SB_WORLD_LAYOUT_H", "", "namespace sb", "{",
+             "#ifndef SB_WORLD_LAYOUT_H", "#define SB_WORLD_LAYOUT_H", "", "namespace sb",
+             "{",
              "    constexpr int world_columns = 32;", "    constexpr int world_rows = 32;", "",
              "    constexpr const char* world_layout[world_rows] = {"]
     for row in g:
         lines.append(f'        "{"".join(row)}",')
+    lines += ["    };", ""]
+    lines += ["    // Where the family stands, in reading order. `favourite` is the person who likes this spot",
+              "    // (nullptr = anyone).",
+              "    struct world_npc_spot { int x, y; const char* favourite; };",
+              f"    constexpr int world_npc_spot_count = {len(NPC_SPOTS)};",
+              "    constexpr world_npc_spot world_npc_spots[world_npc_spot_count] = {"]
+    for x, y, fav in sorted(NPC_SPOTS, key=lambda t: (t[1], t[0])):
+        lines.append(f'        {{ {x}, {y}, {"nullptr" if fav is None else chr(34) + fav + chr(34)} }},')
+    lines += ["    };", ""]
+    # Only objects someone can actually stand behind matter.
+    kept = []
+    for (x0, x1, top, base) in OBJECTS:
+        xa, xb = x0 // CELL, (x1 - 1) // CELL
+        ya, yb = top // CELL - 1, base // CELL - 1
+        if any(0 <= xx < N and 0 <= yy < N and walkable(g[yy][xx])
+               for xx in range(xa, xb + 1) for yy in range(ya, yb + 1)):
+            kept.append((x0, x1, top, base))
+    lines += ["    // Things people can stand behind, in map pixels (0..511): x0, x1, top, base (the line on the ground).",
+              "    // A person whose feet are above `base` (and below `top`) is drawn behind the object.",
+              "    struct world_object { short x0, x1, top, base; };",
+              f"    constexpr int world_object_count = {len(kept)};",
+              "    constexpr world_object world_objects[world_object_count] = {"]
+    for o in kept:
+        lines.append(f"        {{ {o[0]}, {o[1]}, {o[2]}, {o[3]} }},")
     lines += ["    };", "}", "", "#endif", ""]
-    with open(os.path.join(ROOT, "include", "sb_world_layout.h"), "w") as f:
+    with open(os.path.join(ROOT, "include", "sb_world_layout.h"), "w", newline="\n") as f:
         f.write("\n".join(lines))
 
 
 def main():
     os.makedirs(OUT, exist_ok=True)
     g = build_layout()
-    c = paint(g)
-    # Transparent pixels would show the backdrop: fill them with snow.
-    c.px = [SNOW if p is None else p for p in c.px]
-    colours = len(c.colors())
-    tiles = count_tiles(c)
-    print(f"world: {colours} colours, ~{tiles} unique 8x8 tiles (limit 1024)")
-    c.save_bmp(os.path.join(OUT, "world_map.bmp"), bpp=8)
-    write_json(os.path.join(OUT, "world_map.json"), '{\n    "type": "regular_bg",\n    "bpp_mode": "bpp_4_auto"\n}')
+    base, top = paint(g)
+    # Transparent pixels in the ground would show the backdrop: fill them with snow.
+    base.px = [SNOW if p is None else p for p in base.px]
+    palette = base.colors() + [col for col in top.colors() if col not in base.colors()]
+    print(f"world: {len(palette)} colours; ground ~{count_tiles(base)} tiles, top layer ~{count_tiles(top)} tiles "
+          f"(VRAM budget is tight: keep the total under ~700)")
+    base.save_bmp(os.path.join(OUT, "world_map.bmp"), bpp=8, palette=palette)
+    top.save_bmp(os.path.join(OUT, "world_top.bmp"), bpp=8, palette=palette)
+    for name in ("world_map", "world_top"):
+        write_json(os.path.join(OUT, name + ".json"), '{\n    "type": "regular_bg",\n    "bpp_mode": "bpp_8"\n}')
     write_layout_header(g)
     if len(sys.argv) > 1:
-        save_png(sys.argv[1], c, scale=1)
+        save_png(sys.argv[1], base, scale=1)
+        save_png(sys.argv[1].replace(".png", "_top.png"), top, scale=1)
 
 
 if __name__ == "__main__":

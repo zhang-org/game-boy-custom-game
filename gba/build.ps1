@@ -7,6 +7,14 @@ param([switch]$Run, [switch]$Clean)
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
+if ($PSScriptRoot -match ' ') {
+    Write-Host "The folder path has a space in it ($PSScriptRoot) and the build tools can't handle that."
+    Write-Host 'Give the project folder a drive letter and build from there, for example:'
+    Write-Host ('  subst G: "' + (Split-Path $PSScriptRoot -Parent) + '"')
+    Write-Host '  G:\gba\build.ps1'
+    exit 1
+}
+
 $dkp = if ($env:DEVKITPRO_WIN) { $env:DEVKITPRO_WIN } else { 'C:\devkitPro' }
 $make = Join-Path $dkp 'msys2\usr\bin\make.exe'
 if (-not (Test-Path $make)) { Write-Host "devkitPro not found in $dkp (see README: GBA game setup)"; exit 1 }
