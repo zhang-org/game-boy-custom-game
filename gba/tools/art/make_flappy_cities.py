@@ -3,7 +3,8 @@
   flappy_city_stl   St. Louis: the Gateway Arch, the old courthouse dome, downtown
   flappy_city_gnv   Gainesville: a brick clock tower, palm trees with lights, mossy oaks
   flappy_city_sea   Seattle: Mount Rainier, the Space Needle, towers
-  flappy_city_sf    Bay Area: the Golden Gate Bridge, hills, fog
+  flappy_city_sf    Bay Area: the Golden Gate Bridge, hills, fog, the Palace of Fine Arts
+  flappy_city_mtn   Moorestown, New Jersey: colonial brick Main Street, a white church, the town tree
   flappy_candy      16x16 candy cane (bonus pickup)
 
 Each skyline is 512x256 and wraps. The screen shows rows 48..207; the near rooftops cover rows 182..207, so
@@ -104,19 +105,33 @@ def stl(preview):
                 s.put(x, GROUND - 20 - 12 + i, dome if x < cx + half // 2 else dome_d)
         s.rect(cx - 1, GROUND - 20 - 16, 2, 4, dome_d)
         s.rect(cx - 16, GROUND - 21, 32, 2, SNOW)
-        # The Gateway Arch: a tall, thin catenary of steel.
-        ax, half_w, height = base + 40, 34, 80
-        a = 2.0
-        prev = None
-        for i in range(-half_w * 4, half_w * 4 + 1):
-            x = i / 4
+        # The Gateway Arch: a weighted catenary as wide as it is tall. Its legs are triangles in cross-section,
+        # so we see two steel faces: a bright one and a shaded one. Thick at the ground, much thinner at the top.
+        ax, half_w, height = base + 40, 38, 82
+        a = 2.4
+        span = math.cosh(a) - 1
+        for i in range(-half_w * 8, half_w * 8 + 1):
+            x = i / 8
             t = x / half_w
-            y = GROUND - height * (1 - (math.cosh(a * t) - 1) / (math.cosh(a) - 1))
-            thick = 3 if abs(t) < 0.92 else 4
-            for k in range(thick):
-                col = steel_l if (k == 0 and x < 0) else steel_d if k == thick - 1 else steel
-                s.put(ax + x + (k if x >= 0 else -k), y, col)
-                s.put(ax + x + (k if x >= 0 else -k), y + 1, col)
+            y = GROUND - height * (1 - (math.cosh(a * t) - 1) / span)
+            # slope of the curve, for the direction across the leg
+            dy = height * a * math.sinh(a * t) / span / half_w
+            n = math.hypot(1, dy)
+            nx, ny = -dy / n, 1 / n                  # pointing down/outwards from the curve
+            up = (GROUND - y) / height               # 0 at the ground, 1 at the top
+            thick = 7.5 - 4.5 * up                   # about 7 px at the feet, 3 px at the top
+            for k in range(int(thick * 4) + 1):
+                d = k / 4 - thick / 2
+                px = ax + x + nx * d * (1 if x >= 0 else -1)
+                py = y + ny * d
+                outer = d > 0
+                if x < 0:
+                    col = steel_l if outer else steel
+                else:
+                    col = steel if outer else steel_d
+                if abs(d) > thick / 2 - 0.6:
+                    col = steel_d if x >= 0 else steel
+                s.put(round(px), round(py), col)
     s.outline()
     s.save("flappy_city_stl", preview)
 
@@ -223,44 +238,137 @@ def sf(preview):
     hill, hill_d = rgb("#2e4a5a"), rgb("#223a48")
     red, red_d = rgb("#e05a30"), rgb("#a03a20")
     fog, fog_s = rgb("#a8b0d0"), rgb("#8890b8")
-    # Dark hills behind.
+    ochre, ochre_d = rgb("#d8a070"), rgb("#a87048")
+    deck = GROUND - 20
+    # Dark hills behind; they rise into a headland at both ends of each bridge, so the deck runs into land.
     for x in range(W):
-        top = int(GROUND - 34 + 10 * math.sin(x / 40) + 5 * math.sin(x / 13))
-        for y in range(top, GROUND):
+        local = x % 256
+        top = GROUND - 30 + 8 * math.sin(x / 40) + 4 * math.sin(x / 13)
+        for end in (8, 214):
+            d = abs(local - end)
+            if d < 22:
+                top = min(top, deck - 6 - (22 - d) * 0.9)
+        for y in range(int(top), GROUND):
             s.put(x, y, hill if math.sin(x / 40) > 0 else hill_d)
-    skyline_filler(s, rnd, [(0, 220), (256, 476)], heights=(10, 22), widths=(10, 18))
+    # A bank of fog all the way along, under the decks.
+    for x in range(W):
+        for y in range(deck + 3, deck + 3 + int(5 + 3 * math.sin(x * 2 * math.pi / 64))):
+            s.put(x, y, fog if (x + y) % 5 else fog_s)
     for base in (0, 256):
-        # The bridge: two towers, the deck, and the big cables swooping between them.
-        t1, t2 = base + 60, base + 160
-        deck = GROUND - 20
+        # The bridge: deck from headland to headland, two towers, the cables.
+        t1, t2 = base + 62, base + 160
+        for x in range(base + 8, base + 215):
+            s.put(x, deck, red)
+            s.put(x, deck + 1, red_d)
         for tx in (t1, t2):
             s.rect(tx - 3, GROUND - 76, 7, 76 + 26, red)
             s.rect(tx + 2, GROUND - 76, 2, 76 + 26, red_d)
             for y in (GROUND - 70, GROUND - 56, GROUND - 42):
                 s.rect(tx - 3, y, 7, 2, red_d)
                 s.put(tx, y + 3, OUT_C)
-        for x in range(base + 10, base + 212):
-            s.put(x, deck, red)
-            s.put(x, deck + 1, red_d)
-        # Main cable between the towers (a sag), and the side spans down to the ends.
+        cable_top = GROUND - 74
         for x in range(t1, t2 + 1):
             t = (x - t1) / (t2 - t1)
-            y = GROUND - 74 + 50 * 4 * t * (1 - t) * 0.9
+            y = cable_top + 46 * 4 * t * (1 - t)
             s.put(x, y, red)
             if (x - t1) % 6 == 0:
                 for yy in range(int(y) + 1, deck):
                     s.put(x, yy, red_d)
-        for (x0, x1) in ((base + 10, t1), (t2, base + 210)):
-            for x in range(x0, x1 + 1):
-                t = (x - x0) / max(1, x1 - x0)
-                y = (deck - 2 + (GROUND - 74 - deck + 2) * t) if x0 < t1 else (GROUND - 74 + (deck - 2 - GROUND + 74) * t)
+        # side spans: from the tower tops down to the deck at each headland, with a gentle sag
+        for (xa, xb) in ((base + 12, t1), (t2, base + 211)):
+            for x in range(xa, xb + 1):
+                t = (x - xa) / (xb - xa)
+                if xa < t1:
+                    y = deck - 3 + (cable_top - deck + 3) * t + 6 * t * (1 - t)
+                else:
+                    y = cable_top + (deck - 3 - cable_top) * t + 6 * t * (1 - t)
                 s.put(x, y, red)
-        # A bank of fog rolling in under the deck.
-        for x in range(base, base + 230):
-            for y in range(deck + 3, deck + 3 + int(5 + 3 * math.sin(x / 7))):
-                s.put(x, y, fog if (x + y) % 5 else fog_s)
+                if (x - xa) % 6 == 3:
+                    for yy in range(int(y) + 1, deck):
+                        s.put(x, yy, red_d)
+        # The Palace of Fine Arts, between the bridges: a domed rotunda on columns, with colonnades.
+        px = base + 236
+        for cx in range(px - 14, px + 15, 4):              # colonnade wings
+            s.rect(cx, GROUND - 12, 2, 12, ochre if cx < px else ochre_d)
+        s.rect(px - 15, GROUND - 14, 31, 2, ochre)
+        for cx in range(px - 7, px + 8, 3):                # the rotunda's columns
+            s.rect(cx, GROUND - 26, 2, 14, ochre if cx < px + 2 else ochre_d)
+        s.rect(px - 9, GROUND - 28, 19, 3, ochre)
+        for i in range(10):                                # the dome
+            half = int(math.sqrt(max(0.0, 100 - (10 - i) ** 2)) * 0.9)
+            for x in range(px - half, px + half + 1):
+                s.put(x, GROUND - 28 - 10 + i, ochre if x < px + half // 3 else ochre_d)
+        s.rect(px, GROUND - 41, 1, 3, ochre_d)
     s.outline()
     s.save("flappy_city_sf", preview)
+
+
+# ----------------------------------------------------------------------------- Moorestown, New Jersey
+def mtn(preview):
+    s = Sky()
+    rnd = random.Random(6)
+    brick, brick_d = rgb("#a84838"), rgb("#7a3028")
+    white, white_d = rgb("#e8e8f0"), rgb("#a8a8c0")
+    tree, tree_d = rgb("#2e7a40"), rgb("#1e5a30")
+    bulbs = [rgb("#f05050"), WIN, rgb("#60a0f8")]
+    x = 0
+    while x < W:
+        local = x % 256
+        if 92 <= local < 168:                               # leave room for the church and the big tree
+            x = (x // 256) * 256 + 168
+            continue
+        # Colonial brick houses along Main Street: white trim, shutters, a fanlight door, a wreath.
+        w = rnd.choice([30, 34, 38])
+        h = rnd.choice([22, 26, 30])
+        top = GROUND - h
+        s.rect(x, top, w, h + 26, brick)
+        s.rect(x + w - 3, top, 3, h + 26, brick_d)
+        for i in range(8):                                  # roof with snow
+            inset = i
+            s.rect(x - 1 + inset, top - 1 - i, w + 2 - 2 * inset, 1, SNOW if i > 0 else white_d)
+        s.rect(x, top, w, 1, white)
+        for wy in range(top + 4, GROUND - 6, 9):
+            for wx in range(x + 4, x + w - 6, 9):
+                s.rect(wx - 1, wy, 1, 5, OUT_C)              # shutters
+                s.rect(wx + 4, wy, 1, 5, OUT_C)
+                s.rect(wx, wy, 4, 5, WIN if rnd.random() < 0.8 else WIN_W)
+        dx = x + w // 2 - 2
+        s.rect(dx, GROUND - 7, 5, 7, white)
+        s.rect(dx + 1, GROUND - 6, 3, 6, OUT_C)
+        s.put(dx + 2, GROUND - 4, tree)                     # wreath on the door
+        x += w + rnd.choice([2, 4])
+    for base in (0, 256):
+        # The white church with its tall steeple.
+        cx = base + 110
+        s.rect(cx - 12, GROUND - 26, 24, 26 + 26, white)
+        s.rect(cx + 8, GROUND - 26, 4, 26 + 26, white_d)
+        for i in range(10):
+            s.rect(cx - 13 + i, GROUND - 27 - i, 26 - 2 * i, 1, SNOW if i else white_d)
+        s.rect(cx - 4, GROUND - 52, 8, 16, white)
+        s.rect(cx + 2, GROUND - 52, 2, 16, white_d)
+        s.rect(cx - 2, GROUND - 48, 4, 5, WIN)               # the bell window
+        for i in range(16):
+            half = max(0, 4 - i // 4)
+            s.rect(cx - half, GROUND - 53 - i, 2 * half + 1, 1, white if i % 4 else white_d)
+        s.rect(cx, GROUND - 72, 1, 4, WIN)
+        for wy in (GROUND - 20, GROUND - 12):
+            s.rect(cx - 8, wy, 3, 5, WIN)
+            s.rect(cx + 5, wy, 3, 5, WIN)
+        # The big town Christmas tree, all lit up.
+        tx = base + 148
+        for i in range(52):
+            half = 1 + i * 13 // 52
+            if i % 13 > 10:
+                half -= 2
+            s.rect(tx - half, GROUND - 56 + i, 2 * half + 1, 1, tree if (i // 3) % 3 else tree_d)
+        for i in range(6, 52, 5):
+            half = 1 + i * 13 // 52
+            for k, lx in enumerate(range(tx - half + 1, tx + half, 3)):
+                s.put(lx, GROUND - 56 + i + (k % 2), bulbs[(k + i) % 3])
+        s.rect(tx - 1, GROUND - 59, 3, 3, WIN)
+        s.rect(tx - 2, GROUND - 4, 5, 4, brick_d)
+    s.outline()
+    s.save("flappy_city_mtn", preview)
 
 
 # ----------------------------------------------------------------------------- candy cane
@@ -292,6 +400,7 @@ def main():
     gnv(preview)
     sea(preview)
     sf(preview)
+    mtn(preview)
     candy(preview)
     print("Wrote the Jingle Flap cities to", os.path.normpath(OUT))
 
