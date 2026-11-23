@@ -163,7 +163,7 @@ namespace
     constexpr course_def COURSES[] = {
         { "Easy",   EASY_JUMPS,   8,  1.9, true,  true },
         { "Medium", MEDIUM_JUMPS, 10, 2.15, true, true },
-        { "Hard",   HARD_JUMPS,   12, 2.35, false, false },
+        { "Hard",   HARD_JUMPS,   12, 2.15, false, false },
     };
     constexpr int COURSE_COUNT = 3;
     constexpr int MAX_JUMPS = 12;
