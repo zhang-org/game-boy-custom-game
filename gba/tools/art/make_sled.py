@@ -13,6 +13,9 @@ Files (all names start with sled_ because Butano asset names are global):
   sled_fx.bmp         16x16 sprite, 3 frames: big sparkle, small sparkle, crash star.
   sled_puff.bmp       8x8 sprite, 3 frames: snow spray puffs (big to small).
   sled_track.bmp      32x8 sprite, 3 frames: runner tracks straight, drifting left, drifting right.
+  sled_course.bmp     32x32 sprite, 6 frames: red gate, blue gate, ramp, log (left half), log (right half),
+                      the sled's shadow (while it flies off a ramp).
+  sled_banner.bmp     64x32 sprite, 2 frames: the finish banner's left and right halves.
 
 Pass a folder to also write PNG previews (scaled up) there.
 """
@@ -502,6 +505,107 @@ def hill():
     return c
 
 
+# ---------------------------------------------------------------------------------- the race course
+# Gates, ramps, logs, the sled's shadow and the finish banner share ONE palette (one sprite palette slot).
+COURSE_PAL = [OUTLINE, WHITE, SNOW, SNOW_S, SNOW_D, RED, RED_D, BLUE, BLUE_D, WOOD, WOOD_D, WOOD_L,
+              rgb("#303038"), GOLD]
+CHECK_BLACK = rgb("#303038")
+
+
+def frame_gate(flag, flag_d):
+    """A slalom pole with a flag: 32x32, the pole stands at x=15, its foot at row 28."""
+    c = Canvas(32, 32)
+    for y in range(4, 29):
+        c.set(15, y, WHITE if (y // 3) % 2 else flag)
+        c.set(16, y, SNOW_S if (y // 3) % 2 else flag_d)
+    for y in range(4, 13):                          # the flag, waving to the side
+        w = 9 - abs(y - 8)
+        for x in range(17, 17 + w):
+            c.set(x, y, flag if x < 17 + w - 2 else flag_d)
+    c.set(15, 3, GOLD)
+    c.set(16, 3, GOLD)
+    for x in range(12, 20):                         # a little snow heap at the foot
+        c.set(x, 29, SNOW_S)
+    outline(c)
+    return c
+
+
+def frame_ramp():
+    """A snow kicker you ride up: 32x32, the lip (where you take off) at the top, foot at row 28."""
+    c = Canvas(32, 32)
+    for y in range(12, 29):
+        t = (y - 12) / 16
+        half = int(9 + 5 * t)
+        for x in range(16 - half, 16 + half):
+            col = WHITE if y < 15 else SNOW if x < 16 else SNOW_S
+            if x in (16 - half, 16 + half - 1):
+                col = SNOW_D
+            c.set(x, y, col)
+    for x in range(7, 25):                          # wooden lip
+        c.set(x, 12, WOOD)
+        c.set(x, 13, WOOD_D)
+    for y in range(18, 28, 3):                      # ridges showing the slope
+        for x in range(12, 21):
+            if (x + y) % 3:
+                c.set(x, y, SNOW_S)
+    outline(c)
+    return c
+
+
+def frame_log(half):
+    """Half of a 64 px wide log lying across the track (two frames: left half, right half). Foot at row 28."""
+    c = Canvas(32, 32)
+    for x in range(32):
+        gx = x if half == 0 else x + 32
+        if gx < 3 or gx > 60:
+            continue
+        for y in range(20, 28):
+            col = WOOD if y < 24 else WOOD_D
+            if y == 21 and gx % 7 == 0:
+                col = WOOD_L
+            c.set(x, y, col)
+        for y in range(18, 20):                     # snow on top
+            if (gx // 5) % 3 != 2:
+                c.set(x, y, WHITE)
+    if half == 0:                                   # the cut end with rings
+        for y in range(20, 28):
+            for x in range(3, 7):
+                c.set(x, y, WOOD_L)
+        c.set(4, 23, WOOD_D)
+        c.set(5, 24, WOOD_D)
+    outline(c)
+    return c
+
+
+def frame_shadow():
+    """The sled's shadow on the snow while it flies off a ramp."""
+    c = Canvas(32, 32)
+    for y in range(14, 19):
+        for x in range(6, 26):
+            dx, dy = (x - 15.5) / 10, (y - 16) / 2.6
+            if dx * dx + dy * dy <= 1:
+                c.set(x, y, SNOW_D)
+    return c
+
+
+def frame_banner(half):
+    """The finish banner: 64x32 halves (left, right) with posts at both ends and a checkered flag band."""
+    c = Canvas(64, 32)
+    for x in range(64):
+        gx = x if half == 0 else x + 64
+        if gx in (2, 3) or gx in (124, 125):        # the posts
+            for y in range(4, 30):
+                c.set(x, y, WOOD if gx in (2, 124) else WOOD_D)
+            continue
+        if 4 <= gx <= 123:
+            for y in range(5, 15):
+                c.set(x, y, CHECK_BLACK if ((gx // 4) + (y - 5) // 5) % 2 else WHITE)
+            c.set(x, 4, RED)
+            c.set(x, 15, RED)
+    outline(c)
+    return c
+
+
 def stack(frames):
     w, h = frames[0].w, frames[0].h
     s = Canvas(w, h * len(frames))
@@ -510,12 +614,12 @@ def stack(frames):
     return s
 
 
-def save_sprite(name, frames, preview_dir):
+def save_sprite(name, frames, preview_dir, palette=None):
     s = stack(frames)
     n = len(s.colors())
     if n > 15:
         sys.exit(f"{name}: {n} colours, max 15")
-    s.save_bmp(os.path.join(OUT, name + ".bmp"), bpp=4)
+    s.save_bmp(os.path.join(OUT, name + ".bmp"), bpp=4, palette=palette)
     write_json(os.path.join(OUT, name + ".json"),
                '{\n    "type": "sprite",\n    "height": %d\n}' % frames[0].h)
     if preview_dir:
@@ -534,6 +638,9 @@ def main():
     save_sprite("sled_fx", [frame_sparkle(True), frame_sparkle(False), frame_crash()], preview_dir)
     save_sprite("sled_puff", [frame_puff(2), frame_puff(1), frame_puff(0)], preview_dir)
     save_sprite("sled_track", [frame_track(0), frame_track(-1), frame_track(1)], preview_dir)
+    save_sprite("sled_course", [frame_gate(RED, RED_D), frame_gate(BLUE, BLUE_D), frame_ramp(), frame_log(0),
+                                frame_log(1), frame_shadow()], preview_dir, COURSE_PAL)
+    save_sprite("sled_banner", [frame_banner(0), frame_banner(1)], preview_dir, COURSE_PAL)
 
     bg = hill()
     bg.save_bmp(os.path.join(OUT, "sled_hill.bmp"), bpp=8)
