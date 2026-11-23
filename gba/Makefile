@@ -10,7 +10,7 @@ SOURCES     	:=  src src/games
 INCLUDES    	:=  include
 DATA        	:=
 GRAPHICS    	:=  graphics/ui graphics/characters graphics/crowd graphics/world graphics/flappy graphics/pingpong \
-                    graphics/sled graphics/catch graphics/fishing graphics/horse
+                    graphics/sled graphics/catch graphics/fishing graphics/horse graphics/snowball
 AUDIO       	:=  audio
 AUDIOBACKEND	:=  maxmod
 AUDIOTOOL		:=

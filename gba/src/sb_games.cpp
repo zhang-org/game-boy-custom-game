@@ -11,6 +11,7 @@ namespace sb
             { "Gift Catch", "Toy Workshop", catch_run, catch_best_text },
             { "Ice Fishing", "Frozen Pond", fishing_run, fishing_best_text },
             { "Pony Gallop", "Stable", horse_run, horse_best_text },
+            { "Snowball Fight", "Snow Fort", snowball_run, snowball_best_text },
         };
     }
 

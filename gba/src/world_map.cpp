@@ -136,7 +136,7 @@ namespace sb
         int place_at(int x, int y)
         {
             char c = layout_at(x, y);
-            return c >= '1' && c <= '6' ? c - '1' : -1;
+            return c >= '1' && c < '1' + GAME_COUNT ? c - '1' : -1;
         }
 
         bn::fixed world_x(int cell_x)
@@ -225,13 +225,13 @@ namespace sb
         {
             constexpr int x = 1, y = 1, w = 28, h = 18;
             panel(x, y, w, h);
-            bn::vector<label, 14> labels;
+            bn::vector<label, 2 + GAME_COUNT * 2> labels;
             labels.emplace_back();
             labels.back().set(0, -64, "{ High Scores {", text_color::BLUE, align::CENTER);
 
             for(int i = 0; i < GAME_COUNT; ++i)
             {
-                int ty = -40 + i * 16;
+                int ty = -46 + i * 14;
                 labels.emplace_back();
                 labels.back().set(-104, ty, game(i).title);
                 labels.emplace_back();
