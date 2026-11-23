@@ -57,4 +57,14 @@ static const char * const shadow_art[16] = {
     "........", "........",
 };
 
+// Serve bar marker (8x16, only the top row is used). Palette colour 1 = white
+static const char * const marker_art[16] = {
+    "1......1",
+    "11111111",
+    "1......1",
+    "........", "........", "........", "........", "........",
+    "........", "........", "........", "........", "........", "........",
+    "........", "........",
+};
+
 #endif
