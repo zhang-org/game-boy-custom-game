@@ -637,7 +637,7 @@ namespace
             g.sprite.set_bg_priority(1);
             g.sprite.set_z_order(Z_STACK);
             _stack.push_back(g);
-            _best_stack = bn::max(_best_stack, int(_stack.size()));
+            _best_stack = bn::max(_best_stack, _stack.size());
 
             // Catching off-centre gives the stack a push.
             _lean_v += (it.x - top_x()) / CATCH_PUSH_DIVISOR;
