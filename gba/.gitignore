@@ -1,0 +1,8 @@
+# Build output
+build/
+*.gba
+*.elf
+*.sav
+*.ss[0-9]
+# Python caches from the art tools
+__pycache__/
