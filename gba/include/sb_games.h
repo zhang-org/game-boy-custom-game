@@ -41,6 +41,11 @@ namespace sb
     bn::string<8> pingpong_result_text(int value);
     const char* pingpong_level_name(int level);
 
+    // Sled Dash records (src/games/sled.cpp): best time per course, kept in sb_save extra records.
+    int sled_record_slot();                     // first extra record slot (one per course: Easy, Medium, Hard)
+    bn::string<12> sled_record_text(int value); // e.g. "41.3s"
+    const char* sled_course_name(int course);
+
     // Scenes (src/)
     void title_scene();
     void character_select_scene(bool from_map);

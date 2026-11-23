@@ -278,6 +278,27 @@ namespace sb
             return text;
         }
 
+        if(game == GAME_SLED)
+        {
+            // The hardest course with a time.
+            for(int course = 2; course >= 0; --course)
+            {
+                int slot = sled_record_slot() + course;
+
+                if(extra_score(slot) > 0)
+                {
+                    text.append(compact && course == 1 ? "Med" : sled_course_name(course));
+                    text.append(" ");
+                    text.append(sled_record_text(extra_score(slot)));
+                    text.append(by);
+                    text.append(extra_name(slot));
+                    break;
+                }
+            }
+
+            return text;
+        }
+
         if(best_score(game) > 0)
         {
             text.append(to_text(best_score(game)));
