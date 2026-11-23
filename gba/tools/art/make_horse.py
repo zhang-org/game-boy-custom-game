@@ -3,7 +3,8 @@
     python3 tools/art/make_horse.py [PREVIEW_DIR]   # PREVIEW_DIR: optional, writes scaled PNG previews
 
 Sprites (4bpp, 15 colours + transparent):
-  horse_horse.bmp      64x32 frames: 0-3 gallop, 4 jump (legs tucked), 5 stumble, 6 stand
+  horse_horse.bmp      64x64 frames: 0-3 gallop, 4 jump (legs tucked), 5 stumble, 6 stand. The horse fills
+                       the bottom 48 rows (hooves on row 47); the room above keeps the head from being cut off
   horse_rival_pal.bmp  palette swap for the rival's horse (grey horse, blue blanket); same colour order
   horse_obstacles.bmp  16x32 frames: 0 low fence, 1 tall fence, 2 low fence knocked, 3 tall fence knocked,
                        4 hay bale, 5 hay bale knocked, 6 distance flag
@@ -48,7 +49,8 @@ def thick_line(c, x0, y0, x1, y1, r, col):
 def outline_all(c, col, keep=()):
     """1px outline around every opaque pixel (4-neighbourhood)."""
     marks = []
-    for y in range(c.h):
+    off = getattr(c, "off", 0)
+    for y in range(-off, c.h - off):
         for x in range(c.w):
             if c.get(x, y) is not None:
                 continue
@@ -61,7 +63,31 @@ def outline_all(c, col, keep=()):
 
 
 def layer(dst, src):
-    dst.blit(src, 0, 0)
+    if getattr(dst, "off", 0) or getattr(src, "off", 0):
+        for i, p in enumerate(src.px):      # same-size tall canvases: copy the raw pixels
+            if p is not None:
+                dst.px[i] = p
+    else:
+        dst.blit(src, 0, 0)
+
+
+# The horse is drawn in the old 64x32 coordinates (hooves on row 31) but saved in 64x64 frames with
+# HORSE_TOP extra rows above, so the head and ears are never cut off (they reach row -2 when jumping).
+# The sprite's centre stays on old row 16, so the game positions it exactly as before.
+HORSE_TOP = 16
+
+
+class Tall(Canvas):
+    off = HORSE_TOP
+
+    def __init__(self):
+        super().__init__(64, 64)
+
+    def get(self, x, y):
+        return super().get(x, y + HORSE_TOP)
+
+    def set(self, x, y, c):
+        super().set(x, y + HORSE_TOP, c)
 
 
 def recolor(c, mapping):
@@ -132,17 +158,17 @@ def horse_frame(name):
     bob = pose["bob"]
     head = pose.get("head", 0)
     legs = pose["legs"]
-    c = Canvas(64, 32)
+    c = Tall()
 
     # Far legs (darker), each outlined so they read as separate from the near legs.
-    far = Canvas(64, 32)
+    far = Tall()
     leg(far, FRONT_HIP, legs[1], FAR_LEG, bob)
     leg(far, HIND_HIP, legs[3], FAR_LEG, bob)
     outline_all(far, OUTLINE)
     layer(c, far)
 
     # Tail (behind the body): flows back in the wind.
-    tail = Canvas(64, 32)
+    tail = Tall()
     tail_pts = [(13, 10), (9, 10), (6, 12), (4, 15), (3, 19)] if name != "stand" else \
         [(13, 10), (11, 12), (10, 16), (10, 20), (10, 23)]
     for (x0, y0), (x1, y1) in zip(tail_pts, tail_pts[1:]):
@@ -153,14 +179,14 @@ def horse_frame(name):
     layer(c, tail)
 
     # Near legs.
-    near = Canvas(64, 32)
+    near = Tall()
     leg(near, FRONT_HIP, legs[0], COAT, bob)
     leg(near, HIND_HIP, legs[2], COAT, bob)
     outline_all(near, OUTLINE)
     layer(c, near)
 
     # Body, neck and head as one shape.
-    b = Canvas(64, 32)
+    b = Tall()
     b.ellipse(30, 13.5 + bob, 14, 6, COAT)          # barrel
     b.ellipse(19, 12.5 + bob, 7.5, 6.5, COAT)       # hindquarters
     b.ellipse(40, 13.5 + bob, 6.5, 6, COAT)         # chest
@@ -169,7 +195,7 @@ def horse_frame(name):
     b.ellipse(52, 4.5 + hb, 5, 3.6, COAT)                 # head
     b.ellipse(57, 7.5 + hb, 3.6, 2.8, COAT)               # muzzle
     # Shading: highlight along the top edge, shadow along the belly.
-    for y in range(32):
+    for y in range(-HORSE_TOP, 32):
         for x in range(64):
             if b.get(x, y) != COAT:
                 continue
@@ -178,7 +204,7 @@ def horse_frame(name):
             elif b.get(x, y + 2) is None or (b.get(x, y + 3) is None and x < 46):
                 b.set(x, y, COAT_S)
     # Muzzle tip darker, nostril, eye with a glint.
-    for y in range(32):
+    for y in range(-HORSE_TOP, 32):
         for x in range(58, 64):
             if b.get(x, y) in (COAT, COAT_S, COAT_L):
                 b.set(x, y, MUZZLE)
@@ -194,7 +220,7 @@ def horse_frame(name):
     b.set(50, 1 + hb, COAT)
     b.set(51, 1 + hb, COAT_S)
     # Red winter blanket over the back with a gold trim, and the saddle on top.
-    for y in range(32):
+    for y in range(-HORSE_TOP, 32):
         for x in range(22, 38):
             if b.get(x, y) is not None and y <= 16 + bob:
                 b.set(x, y, BLANKET if y < 14 + bob else BLANKET_S)
@@ -230,9 +256,9 @@ def horse_frame(name):
 
 
 def horse_sheet(palette):
-    s = Canvas(64, 32 * len(FRAMES))
+    s = Canvas(64, 64 * len(FRAMES))
     for i, f in enumerate(FRAMES):
-        s.blit(horse_frame(f), 0, 32 * i)
+        s.blit(horse_frame(f), 0, 64 * i)
     if palette is not HORSE_PALETTE:
         recolor(s, dict(zip(HORSE_PALETTE, palette)))
     return s
@@ -381,7 +407,7 @@ def drift_sheet():
             for x in range(32):
                 if c.get(x, y) == SNOW and (x > 18 and c.get(x + 3, y) != SNOW or y == 15):
                     c.set(x, y, SNOW_S)
-        outline_all(c, rgb("#7890c8"))
+        outline_all(c, STONE)
         if i == 1:
             for x in (5, 12, 20, 26):
                 c.set(x, 10, SNOW)
@@ -402,6 +428,247 @@ def puff_sheet():
             outline_all(c, SNOW_S)
         s.blit(c, 0, 16 * i)
     return s
+
+
+# ----------------------------------------------------------------------------- race course + HUD
+# Walls, the water ditch, the finish line, the rhythm lane and the progress bar share ONE palette
+# (COURSE_PAL; the snow drift and puffs use it too), so the race needs only one more palette slot.
+STONE = rgb("#8890a0")
+STONE_S = rgb("#586070")
+STONE_L = rgb("#b8c0c8")
+WATER = rgb("#3870c0")
+WATER_D = rgb("#204888")
+ICE = rgb("#90c8f0")
+INK = rgb("#282830")
+GOLD = rgb("#f8c840")
+GOLD_D = rgb("#c08820")
+PIN_RED = rgb("#e03838")
+PIN_BLUE = rgb("#3070d8")
+GREEN = rgb("#48b048")
+COURSE_PAL = [INK, STONE, STONE_S, STONE_L, SNOW, SNOW_S, WATER, WATER_D, ICE, GOLD, GOLD_D, PIN_RED, PIN_BLUE,
+              GREEN, WOOD]
+
+
+def stone_wall(knocked=False):
+    """A dry stone wall with a snow cap: 32x32, 20 px wide, 26 px tall (snow included), foot on row 31."""
+    c = Canvas(32, 32)
+    w = Canvas(32, 32)
+    if not knocked:
+        top = 8
+        for row, y in enumerate(range(top, 32, 4)):
+            shift = 0 if row % 2 else 3
+            for x in range(6, 26):
+                w.set(x, y, STONE_S)                       # mortar line
+                for yy in range(y + 1, min(y + 4, 32)):
+                    edge = (x - 6 + shift) % 6 == 0
+                    w.set(x, yy, STONE_S if edge else (STONE_L if yy == y + 1 else STONE))
+        outline_all(w, INK)
+        layer(c, w)
+        for x in range(5, 27):                             # snow cap, drooping over the edge
+            c.set(x, top - 2, SNOW_S if x in (5, 26) else SNOW)
+            c.set(x, top - 1, SNOW)
+            if x % 5 == 1:
+                c.set(x, top, SNOW)
+                c.set(x, top + 1, SNOW_S)
+        for x in range(8, 24):
+            c.set(x, top - 3, SNOW if 9 < x < 22 else SNOW_S)
+        c.set(x, top - 3, SNOW_S)
+    else:
+        for (x, y, ww) in ((3, 27, 7), (10, 28, 6), (16, 26, 8), (24, 28, 6), (12, 23, 6)):
+            w.rect(x, y, ww, 32 - y, STONE)
+            w.hline(x, x + ww - 1, y, STONE_L)
+        outline_all(w, INK)
+        layer(c, w)
+        for x in (4, 9, 18, 27):
+            c.set(x, 25, SNOW)
+            c.set(x + 1, 25, SNOW)
+    return c
+
+
+def water_ditch(splash=False):
+    """An icy water ditch cut across the track: 64x32 (the ditch is the bottom 16 rows, the top half is room
+    for the splash), the water is 60 px wide: far bank, dark water with ice floes, near bank."""
+    full = Canvas(64, 32)
+    c = Canvas(64, 16)
+    for x in range(64):
+        edge = x < 2 or x > 61
+        for y in range(2, 15):
+            if edge:
+                c.set(x, y, SNOW_S)
+            elif y < 4:
+                c.set(x, y, WATER_D)
+            else:
+                c.set(x, y, WATER if (x * 3 + y * 5) % 23 else ICE)
+        c.set(x, 1, SNOW if not edge else SNOW_S)
+        c.set(x, 15, SNOW)
+        if 2 <= x <= 61:
+            c.set(x, 14, SNOW_S)
+    for (x0, y0, ww) in ((8, 7, 6), (26, 10, 5), (44, 6, 7), (54, 11, 4)):   # floating ice
+        for x in range(x0, x0 + ww):
+            c.set(x, y0, STONE_L)
+            c.set(x, y0 + 1, ICE)
+    full.blit(c, 0, 16)
+    if splash:                                      # a fountain of water and ice
+        for k in range(16):
+            t = k / 15
+            x = 14 + t * 36
+            top = 24 - int(18 * (1 - (2 * t - 1) ** 2))
+            disc(full, x, top, 1.6, SNOW if k % 3 else ICE)
+            if k % 2 == 0:
+                disc(full, x, top + 4, 1.2, ICE)
+    return full
+
+
+def finish_pole():
+    """The finish post with a checkered flag: 32x64 (the post is on the left, at x 2-4; the flag flies to
+    the right), foot on row 63 (stands on the bank between lanes)."""
+    c = Canvas(32, 64)
+    p = Canvas(32, 64)
+    p.rect(2, 6, 3, 58, STONE_L)
+    for y in range(6, 64):
+        if (y // 4) % 2:
+            p.set(3, y, PIN_RED)
+            p.set(2, y, PIN_RED)
+    for y in range(7, 23):
+        wave = 1 if 10 < y < 18 else 0
+        for x in range(5, 27):
+            p.set(x, y + (wave if x > 15 else 0), INK if ((x - 5) // 4 + (y - 7) // 4) % 2 else SNOW)
+    outline_all(p, INK)
+    layer(c, p)
+    disc(c, 3.5, 4, 2.2, GOLD)
+    c.set(3, 3, rgb("#f8f8f8"))
+    return c
+
+
+def finish_strip():
+    """A checkered line painted across a lane: 8x32 (two squares wide), drawn flat on the track."""
+    c = Canvas(8, 32)
+    for y in range(32):
+        for x in range(8):
+            c.set(x, y, INK if (x // 4 + y // 4) % 2 else SNOW)
+    return c
+
+
+def horseshoe(dim=False):
+    """A beat note in the rhythm lane: a golden horseshoe, 16x16. dim = a beat that went by."""
+    c = Canvas(16, 16)
+    body, shade = (GOLD, GOLD_D) if not dim else (STONE_L, STONE)
+    for y in range(16):
+        for x in range(16):
+            dx, dy = (x + 0.5 - 8) / 6.5, (y + 0.5 - 7) / 6.5
+            r = dx * dx + dy * dy
+            if 0.36 <= r <= 1.0 and y < 15:
+                c.set(x, y, shade if y > 9 or dx > 0.55 else body)
+    for y in range(9, 15):                          # the shoe is open at the bottom
+        for x in range(6, 10):
+            c.set(x, y, None)
+    for (x, y) in ((3, 6), (12, 6), (4, 10), (11, 10)):
+        c.set(x, y, INK)                            # nail holes
+    outline_all(c, INK)
+    return c
+
+
+def target_ring(kind):
+    """Where the beat lands: 0 idle, 1 perfect (gold burst), 2 good (white flash), 3 tired (grey)."""
+    c = Canvas(16, 16)
+    col = {0: SNOW, 1: GOLD, 2: rgb("#f8f8f8"), 3: STONE}[kind]
+    inner = {0: STONE_S, 1: GOLD_D, 2: SNOW_S, 3: STONE_S}[kind]
+    for y in range(16):
+        for x in range(16):
+            r = ((x + 0.5 - 8) ** 2 + (y + 0.5 - 8) ** 2) ** 0.5
+            if 5.5 <= r <= 7.5:
+                c.set(x, y, col)
+            elif 4.5 <= r < 5.5:
+                c.set(x, y, inner)
+    if kind == 1:
+        for (x, y) in ((8, 0), (8, 15), (0, 8), (15, 8), (2, 2), (13, 2), (2, 13), (13, 13)):
+            c.set(x, y, rgb("#f8f8f8"))
+    if kind != 1:
+        outline_all(c, INK)
+    return c
+
+
+def bar_piece():
+    """The race progress bar (top of the screen), 32x8; three of them side by side, the last one ends in a
+    checkered finish square."""
+    frames = []
+    for last in (False, True):
+        c = Canvas(32, 8)
+        for x in range(32):
+            c.set(x, 3, SNOW)
+            c.set(x, 4, STONE_S)
+        if last:
+            for y in range(0, 8):
+                for x in range(26, 32):
+                    c.set(x, y, INK if ((x - 26) // 3 + y // 3) % 2 else SNOW)
+        frames.append(c)
+    return frames
+
+
+def pin(col):
+    """A rider's marker on the progress bar, 8x8."""
+    c = Canvas(8, 8)
+    disc(c, 3.5, 3, 2.6, col)
+    c.set(3, 6, col)
+    c.set(4, 6, col)
+    c.set(3, 7, col)
+    outline_all(c, INK)
+    c.set(2, 2, rgb("#f8f8f8"))
+    return c
+
+
+def stamina_frames():
+    """The horse's stamina bar, 32x8: 9 frames from empty to full (green, then gold, then red when low)."""
+    frames = []
+    for level in range(9):
+        c = Canvas(32, 8)
+        c.rect(0, 1, 32, 6, INK)
+        c.rect(1, 2, 30, 4, STONE_S)
+        fill = round(30 * level / 8)
+        col = GREEN if level >= 5 else GOLD if level >= 3 else PIN_RED
+        for x in range(1, 1 + fill):
+            c.set(x, 2, rgb("#f8f8f8") if level >= 5 else col)
+            for y in range(3, 6):
+                c.set(x, y, col)
+        frames.append(c)
+    return frames
+
+
+def save_course_art(preview):
+    """horse_course 32x32 (0 wall, 1 wall knocked), horse_ditch 64x32 (0 water, 1 splash), horse_finish 32x64,
+    horse_strip 8x32, horse_notes 16x16 (0 shoe, 1 dim shoe, 2-5 ring idle/perfect/good/tired),
+    horse_bar 32x8 (0 bar, 1 bar end), horse_pins 8x8 (0 you, 1 rival), horse_stamina 32x8 (0 empty .. 8 full)."""
+    sheets = {
+        "horse_course": (32, [stone_wall(), stone_wall(True)]),
+        "horse_ditch": (32, [water_ditch(), water_ditch(True)]),
+        "horse_finish": (64, [finish_pole()]),
+        "horse_strip": (32, [finish_strip()]),
+        "horse_notes": (16, [horseshoe(), horseshoe(True)] + [target_ring(k) for k in range(4)]),
+        "horse_bar": (8, bar_piece()),
+        "horse_pins": (8, [pin(PIN_RED), pin(PIN_BLUE)]),
+        "horse_stamina": (8, stamina_frames()),
+    }
+    out = []
+    for name, (h, frames) in sheets.items():
+        w = frames[0].w
+        sh = Canvas(w, h * len(frames))
+        for i, f in enumerate(frames):
+            sh.blit(f, 0, h * i)
+        extra = [col for col in sh.colors() if col not in COURSE_PAL]
+        if extra:
+            sys.exit(f"{name}: colours not in COURSE_PAL: {extra}")
+        sh.save_bmp(os.path.join(OUT, name + ".bmp"), bpp=4, palette=COURSE_PAL)
+        write_json(os.path.join(OUT, name + ".json"), SPRITE_JSON % h)
+        out.append(sh)
+    if preview:
+        os.makedirs(preview, exist_ok=True)
+        wsum = sum(sh.w + 4 for sh in out)
+        prev = Canvas(wsum, max(sh.h for sh in out))
+        x = 0
+        for sh in out:
+            prev.blit(sh, x, 0)
+            x += sh.w + 4
+        save_png(os.path.join(preview, "course.png"), prev, scale=3)
 
 
 # ----------------------------------------------------------------------------- backgrounds
@@ -705,7 +972,7 @@ def main():
     horse = horse_sheet(HORSE_PALETTE)
     check_sprite("horse", horse)
     horse.save_bmp(os.path.join(OUT, "horse_horse.bmp"), bpp=4, palette=HORSE_PALETTE)
-    write_json(os.path.join(OUT, "horse_horse.json"), SPRITE_JSON % 32)
+    write_json(os.path.join(OUT, "horse_horse.json"), SPRITE_JSON % 64)
 
     pal = Canvas(16, 8)
     for i, col in enumerate(RIVAL_PALETTE):
@@ -719,11 +986,12 @@ def main():
     write_json(os.path.join(OUT, "horse_obstacles.json"), SPRITE_JSON % 32)
 
     drift = drift_sheet()
-    drift.save_bmp(os.path.join(OUT, "horse_drift.bmp"), bpp=4)
+    drift.save_bmp(os.path.join(OUT, "horse_drift.bmp"), bpp=4, palette=COURSE_PAL)
     write_json(os.path.join(OUT, "horse_drift.json"), SPRITE_JSON % 16)
 
     puff = puff_sheet()
-    puff.save_bmp(os.path.join(OUT, "horse_puff.bmp"), bpp=4)
+    puff.save_bmp(os.path.join(OUT, "horse_puff.bmp"), bpp=4, palette=COURSE_PAL)
+    save_course_art(preview)
     write_json(os.path.join(OUT, "horse_puff.json"), SPRITE_JSON % 16)
 
     bgs = {"horse_far": make_far(), "horse_mid": make_mid(), "horse_near": make_near()}
@@ -738,7 +1006,7 @@ def main():
     if preview:
         os.makedirs(preview, exist_ok=True)
         rival = horse_sheet(RIVAL_PALETTE)
-        sheet = Canvas(64 * 2 + 4 + 16 * 2 + 4 + 32 + 4 + 16, 32 * len(FRAMES))
+        sheet = Canvas(64 * 2 + 4 + 16 * 2 + 4 + 32 + 4 + 16, 64 * len(FRAMES))
         sheet.blit(horse, 0, 0)
         sheet.blit(rival, 68, 0)
         sheet.blit(obst, 136, 0)
@@ -765,13 +1033,13 @@ def compose_scene(bgs, horse):
     rider = mc._crop(mc.sheet(mc.CHARACTERS[1]), 10)
     other = mc._crop(mc.sheet(mc.CHARACTERS[3]), 10)
     rival = horse_sheet(RIVAL_PALETTE)
-    frame0 = Canvas(64, 32)
+    frame0 = Canvas(64, 64)
     frame0.blit(rival, 0, 0)
-    sc.blit(frame0, 110, 104 - 32)
+    sc.blit(frame0, 110, 104 - 48)
     sc.blit(other, 110 + RIDER_DX, 104 - 32 + RIDER_DY)
-    f0 = Canvas(64, 32)
-    f0.blit(horse, 0, -32 * 0)
-    sc.blit(f0, 30, 140 - 32)
+    f0 = Canvas(64, 64)
+    f0.blit(horse, 0, -64 * 4)
+    sc.blit(f0, 30, 140 - 48)
     sc.blit(rider, 30 + RIDER_DX, 140 - 32 + RIDER_DY)
     obst = obstacle_sheet()
     o = Canvas(16, 32)
