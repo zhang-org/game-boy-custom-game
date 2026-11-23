@@ -25,6 +25,7 @@
 #include "sb_characters.h"
 #include "sb_core.h"
 #include "sb_games.h"
+#include "sb_save.h"
 #include "sb_snow.h"
 #include "sb_text.h"
 #include "sb_ui.h"
@@ -800,6 +801,12 @@ namespace
             }
         }
     };
+}
+
+// The best record shown on the map, the intro and the high score list (sb_games.h: game_info::best_text).
+bn::string<40> sb::catch_best_text(bool compact)
+{
+    return score_record_text(GAME_CATCH, compact);
 }
 
 void sb::catch_run()
