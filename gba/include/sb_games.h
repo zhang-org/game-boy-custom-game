@@ -11,7 +11,7 @@ namespace sb
         GAME_FLAPPY = 0,  // Jingle Flap: fly the reindeer between the chimneys
         GAME_PINGPONG,    // Ping Pong Pals: first to 7 vs. the CPU
         GAME_SLED,        // Sled Dash: dodge trees and rocks, grab presents
-        GAME_CATCH,       // Gift Catch: catch presents, avoid coal
+        GAME_CATCH,       // Gift Tower (was Gift Catch): stack presents, deliver them to the sleigh
         GAME_FISHING,     // Ice Fishing: cast, wait, reel
         GAME_HORSE,       // Pony Gallop: jump the fences
         GAME_COUNT
