@@ -93,13 +93,12 @@ namespace sb
             return false;
         }
 
-        // Puts a sprite in the right place in the draw order for where it stands.
+        // Puts a sprite in front of or behind the top layer (trees, houses ...) for where it stands.
+        // Between sprites, Butano only allows a few different z orders ("sort layers"), so people and
+        // animals standing still all use z 0, and only the player moves in front (-1) or behind (+1) them.
         void sort_sprite(bn::sprite_ptr& sprite, bool behind)
         {
             sprite.set_bg_priority(behind ? PRIORITY_BEHIND : PRIORITY_IN_FRONT);
-            // Lower on the screen = in front of the others (z order: lower is drawn on top).
-            int feet = sprite.y().right_shift_integer() + HALF_MAP + FEET_OFFSET;
-            sprite.set_z_order(-(feet / CELL));
         }
 
         // The horse in the paddock and the reindeer outside the Roost.
@@ -237,11 +236,10 @@ namespace sb
                 labels.back().set(-104, ty, game(i).title);
                 labels.emplace_back();
 
-                if(best_score(i) > 0)
+                bn::string<40> text = best_record_text(i, true);
+
+                if(! text.empty())
                 {
-                    bn::string<32> text(to_text(best_score(i)));
-                    text.append("  ");
-                    text.append(best_name(i));
                     labels.back().set(104, ty, text, text_color::RED, align::RIGHT);
                 }
                 else
@@ -326,6 +324,7 @@ namespace sb
 
             reindeer_a.set_camera(camera);
             sort_sprite(reindeer_a, false);
+            reindeer_a.set_z_order(1);      // the back one
             reindeer_b.set_camera(camera);
             sort_sprite(reindeer_b, false);
 
@@ -337,14 +336,14 @@ namespace sb
             reflection.set_vertical_flip(true);
             reflection.set_blending_enabled(true);
             reflection.set_bg_priority(PRIORITY_BEHIND);
-            reflection.set_z_order(500);
+            reflection.set_z_order(2);
             reflection.set_visible(false);
 
             // Apple and heart for the pony (hidden until needed).
             bn::sprite_ptr effect = bn::sprite_items::world_fx.create_sprite(0, 0);
             effect.set_camera(camera);
             effect.set_bg_priority(1);
-            effect.set_z_order(-100);
+            effect.set_z_order(-1);
             effect.set_visible(false);
 
             auto npc_at = [&npcs](int x, int y) -> npc* {
@@ -542,7 +541,7 @@ namespace sb
                                 bn::sprite_ptr print = bn::sprite_items::world_prints.create_sprite(px, py, dx ? 1 : 0);
                                 print.set_camera(camera);
                                 print.set_bg_priority(PRIORITY_BEHIND);
-                                print.set_z_order(600);
+                                print.set_z_order(2);
                                 footprints.push_back({ print, step_count, dx != 0 });
                             }
 
@@ -642,6 +641,26 @@ namespace sb
                 player.set_horizontal_flip(dir == DIR_LEFT);
                 player.set_position(pos_x, pos_y);
                 sort_sprite(player, is_behind_something(pos_x, pos_y));
+
+                // In front of the people and animals it overlaps that stand higher up, behind the lower ones.
+                int player_z = -1;
+
+                auto check_overlap = [&](const bn::sprite_ptr& other) {
+                    if(bn::abs(other.x() - pos_x) < 16 && bn::abs(other.y() - pos_y) < 32 && other.y() > pos_y)
+                    {
+                        player_z = 1;
+                    }
+                };
+
+                for(const npc& n : npcs)
+                {
+                    check_overlap(n.sprite);
+                }
+
+                check_overlap(horse);
+                check_overlap(reindeer_a);
+                check_overlap(reindeer_b);
+                player.set_z_order(player_z);
                 bn::fixed_point cam_delta = place_camera();
 
                 // Footprints get paler, then vanish, as you walk on.
@@ -694,11 +713,11 @@ namespace sb
                         info_game.set(104, y0 + 12, game(place).title, text_color::BLUE, align::RIGHT);
                         bn::string<48> best("{ Best: ");
 
-                        if(best_score(place) > 0)
+                        bn::string<40> record = best_record_text(place);
+
+                        if(! record.empty())
                         {
-                            best.append(to_text(best_score(place)));
-                            best.append(" by ");
-                            best.append(best_name(place));
+                            best.append(record);
                         }
                         else
                         {

@@ -2,6 +2,8 @@
 #ifndef SB_GAMES_H
 #define SB_GAMES_H
 
+#include "bn_string.h"
+
 namespace sb
 {
     enum game_id
@@ -31,6 +33,13 @@ namespace sb
     void catch_run();
     void fishing_run();
     void horse_run();
+
+    // Ping Pong results (src/games/pingpong.cpp). A result is saved as one number that sorts correctly
+    // (any win beats any loss, then the bigger margin); these turn it back into text like "5-2".
+    int pingpong_result_value(int my_points, int cpu_points);
+    bool pingpong_result_won(int value);
+    bn::string<8> pingpong_result_text(int value);
+    const char* pingpong_level_name(int level);
 
     // Scenes (src/)
     void title_scene();

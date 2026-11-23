@@ -267,8 +267,122 @@ namespace sb
         clear_rect(x, y, w, h);
     }
 
+    namespace
+    {
+        // The instructions of the game being played (for "How to play" in the pause menu).
+        bn::span<const bn::string_view> g_howto;
+        int g_howto_game = -1;
+
+        constexpr int HOWTO_VISIBLE = 6;        // lines shown at once
+        constexpr int HOWTO_LINE_Y = -30;       // screen y of the first visible line
+        constexpr int HOWTO_LINE_STEP = 13;
+
+        // A scrolling block of instructions inside the box at tile (x, y, w). Lines starting with '#' are
+        // headings (blue). Returns how far down it is scrolled.
+        struct howto_text
+        {
+            bn::span<const bn::string_view> lines;
+            int x;
+            int top = 0;
+            label shown[HOWTO_VISIBLE];
+            label up_arrow, down_arrow;
+
+            int max_top() const
+            {
+                return bn::max(0, int(lines.size()) - HOWTO_VISIBLE);
+            }
+
+            bool at_bottom() const
+            {
+                return top >= max_top();
+            }
+
+            void draw()
+            {
+                for(int i = 0; i < HOWTO_VISIBLE; ++i)
+                {
+                    int index = top + i;
+
+                    if(index < lines.size())
+                    {
+                        bn::string_view line = lines[index];
+                        bool heading = ! line.empty() && line[0] == '#';
+
+                        if(heading)
+                        {
+                            line.remove_prefix(1);
+                        }
+
+                        if(line.empty())
+                        {
+                            shown[i].clear();
+                        }
+                        else
+                        {
+                            shown[i].set(text_x(x + 1) + 4, HOWTO_LINE_Y + i * HOWTO_LINE_STEP, line,
+                                         heading ? text_color::BLUE : text_color::DARK);
+                        }
+                    }
+                    else
+                    {
+                        shown[i].clear();
+                    }
+                }
+            }
+
+            // Up/Down scroll (holding repeats). Returns true if it moved.
+            bool update_scroll(int t)
+            {
+                int old = top;
+                bool repeat = t % 6 == 0;
+
+                if(bn::keypad::down_pressed() || (bn::keypad::down_held() && repeat))
+                {
+                    top = bn::min(top + 1, max_top());
+                }
+                else if(bn::keypad::up_pressed() || (bn::keypad::up_held() && repeat))
+                {
+                    top = bn::max(top - 1, 0);
+                }
+
+                if(old != top)
+                {
+                    sfx(bn::sound_items::sfx_select);
+                    draw();
+                }
+
+                // Blinking arrows show that there is more above / below.
+                bool blink = (t / 16) % 2 == 0;
+                int ax = text_x(x) + 8 * 23;
+
+                if(top > 0 && blink)
+                {
+                    up_arrow.set(ax, HOWTO_LINE_Y - 4, "^", text_color::RED);
+                }
+                else
+                {
+                    up_arrow.clear();
+                }
+
+                if(! at_bottom() && blink)
+                {
+                    down_arrow.set(ax, HOWTO_LINE_Y + (HOWTO_VISIBLE - 1) * HOWTO_LINE_STEP + 4, "_", text_color::RED);
+                }
+                else
+                {
+                    down_arrow.clear();
+                }
+
+                return old != top;
+            }
+        };
+    }
+
     bool game_intro(int game_index, const bn::span<const bn::string_view>& howto)
     {
+        g_howto = howto;
+        g_howto_game = game_index;
+
         const game_info& info = game(game_index);
         constexpr int x = 2, y = 1, w = 26, h = 18;
         panel(x, y, w, h);
@@ -278,47 +392,60 @@ namespace sb
             fade_in();
         }
 
-        label title, place, best, start;
-        bn::vector<label, 4> lines;
+        label title, best, start;
         title.set(0, text_y(y + 1), info.title, text_color::BLUE, align::CENTER);
-        place.set(0, text_y(y + 3) - 4, info.place, text_color::GREEN, align::CENTER);
-
-        for(int i = 0; i < howto.size() && i < 4; ++i)
-        {
-            lines.emplace_back();
-            lines.back().set(text_x(x + 1) + 4, text_y(y + 6 + i * 2) - 4, howto[i]);
-        }
 
         bn::string<48> best_text;
+        bn::string<40> record = best_record_text(game_index);
 
-        if(best_score(game_index) > 0)
+        if(! record.empty())
         {
             best_text.append("{ Best: ");
-            best_text.append(to_text(best_score(game_index)));
-            best_text.append(" by ");
-            best_text.append(best_name(game_index));
-            best.set(0, text_y(y + 14) - 4, best_text, text_color::RED, align::CENTER);
+            best_text.append(record);
+        }
+        else
+        {
+            best_text.append(info.place);
         }
 
+        best.set(0, text_y(y + 3) - 6, best_text, record.empty() ? text_color::GREEN : text_color::RED, align::CENTER);
+
+        howto_text text;
+        text.lines = howto;
+        text.x = x;
+        text.draw();
+
+        // The very first time, read it all: A only works once you have scrolled to the bottom.
+        bool must_read = ! howto_seen(game_index);
         update();
         bool result = false;
 
         for(int t = 0; ; ++t)
         {
+            text.update_scroll(t);
+            bool can_start = ! must_read || text.at_bottom();
+
             if(t % 40 == 0)
             {
-                start.set(0, text_y(y + 16) - 4, "A: Start    B: Map", text_color::DARK, align::CENTER);
+                start.set(0, text_y(y + 16) - 2, can_start ? "A: Start    B: Map" : "_ Scroll down to read  B: Map",
+                          text_color::DARK, align::CENTER);
             }
-            else if(t % 40 == 28)
+            else if(t % 40 == 30 && can_start)
             {
                 start.clear();
             }
 
             update();
 
-            if(bn::keypad::a_pressed() || bn::keypad::start_pressed())
+            if(can_start && (bn::keypad::a_pressed() || bn::keypad::start_pressed()))
             {
                 sfx(bn::sound_items::sfx_confirm);
+
+                if(must_read)
+                {
+                    set_howto_seen(game_index);
+                }
+
                 result = true;
                 break;
             }
@@ -334,20 +461,66 @@ namespace sb
         return result;
     }
 
+    // "How to play" from the pause menu: the same instructions, scrollable, B or A to close.
+    void show_howto()
+    {
+        if(g_howto.empty())
+        {
+            return;
+        }
+
+        constexpr int x = 2, y = 1, w = 26, h = 18;
+        panel(x, y, w, h);
+        label title, hint;
+        title.set(0, text_y(y + 1), "How to play", text_color::BLUE, align::CENTER);
+        hint.set(0, text_y(y + 16) - 2, "^_ Scroll    B: Back", text_color::DARK, align::CENTER);
+
+        howto_text text;
+        text.lines = g_howto;
+        text.x = x;
+        text.draw();
+        update();
+
+        for(int t = 0; ; ++t)
+        {
+            text.update_scroll(t);
+            update();
+
+            if(bn::keypad::b_pressed() || bn::keypad::a_pressed() || bn::keypad::start_pressed())
+            {
+                sfx(bn::sound_items::sfx_back);
+                break;
+            }
+        }
+
+        clear_rect(x, y, w, h);
+    }
+
     bool game_pause()
     {
         sfx(bn::sound_items::sfx_select);
-        constexpr int x = 9, y = 4, w = 12, h = 3;
-        panel(x, y, w, h);
-        label title;
-        title.set(0, text_y(y) + 4, "Paused", text_color::BLUE, align::CENTER);
 
-        constexpr bn::string_view items[] = { "Continue", "Quit to map" };
-        int choice = menu(8, 8, items, 0, true);
-        title.clear();
-        clear_rect(x, y, w, h);
-        update();
-        return choice == 1;
+        while(true)
+        {
+            constexpr int x = 9, y = 3, w = 12, h = 3;
+            panel(x, y, w, h);
+            label title;
+            title.set(0, text_y(y) + 4, "Paused", text_color::BLUE, align::CENTER);
+
+            constexpr bn::string_view items[] = { "Continue", "How to play", "Quit to map" };
+            int choice = menu(8, 7, items, 0, true);
+            title.clear();
+            clear_rect(x, y, w, h);
+
+            if(choice == 1)
+            {
+                show_howto();
+                continue;
+            }
+
+            update();
+            return choice == 2;
+        }
     }
 
     bool game_over(int game_index, int score, const bn::string_view& detail)
@@ -371,12 +544,11 @@ namespace sb
         score_label.set(0, text_y(y + 5), score_text, text_color::DARK, align::CENTER);
 
         bn::string<48> best_text("{ Best: ");
+        bn::string<40> best_record = best_record_text(game_index);
 
-        if(best_score(game_index) > 0)
+        if(! best_record.empty())
         {
-            best_text.append(to_text(best_score(game_index)));
-            best_text.append(" by ");
-            best_text.append(best_name(game_index));
+            best_text.append(best_record);
         }
         else
         {

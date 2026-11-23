@@ -340,23 +340,38 @@ def draw_tree(c):
         c.set(px + w // 2 + 1, py - 2, rib)
 
 
-def draw_crate(c):
-    """A crate of spare balls in the bottom-left corner."""
-    x0, y0 = 10, 122
-    c.rect(x0, y0, 26, 16, WAIN)
-    for y in (y0 + 5, y0 + 10):
-        c.hline(x0, x0 + 25, y, WAIN_DARK)
-    c.hline(x0, x0 + 25, y0, WAIN_LIGHT)
-    c.vline(x0 - 1, y0 - 1, y0 + 16, OUTLINE)
-    c.vline(x0 + 26, y0 - 1, y0 + 16, OUTLINE)
-    c.hline(x0 - 1, x0 + 26, y0 + 16, OUTLINE)
-    for bx in range(x0 + 2, x0 + 24, 5):
-        c.ellipse(bx + 2, y0 - 1, 2.2, 2.2, WHITE)
-        c.set(bx + 2, y0 + 1, SNOW_SHADE)
-    for bx in range(x0 + 2, x0 + 24, 5):
-        c.set(bx, y0 - 3, OUTLINE) if False else None
-    # crate shadow
-    c.hline(x0, x0 + 27, y0 + 17, FLOOR_SEAM)
+# The flip scoreboard in the bottom-left corner. The game writes the two scores on its white cards
+# (centres at screen x=16 and x=35, y=118: keep SCOREBOARD_* in pingpong.cpp in sync).
+def draw_scoreboard(c):
+    x0, y0, w, h = 6, 106, 40, 26
+    # legs
+    for lx in (x0 + 4, x0 + w - 6):
+        c.rect(lx, y0 + h, 2, 8, WAIN_DARK)
+        c.vline(lx - 1, y0 + h, y0 + h + 7, OUTLINE)
+        c.vline(lx + 2, y0 + h, y0 + h + 7, OUTLINE)
+    # wooden frame
+    c.rect(x0, y0, w, h, WAIN)
+    c.hline(x0, x0 + w - 1, y0, WAIN_LIGHT)
+    c.hline(x0, x0 + w - 1, y0 + h - 1, WAIN_DARK)
+    c.vline(x0 - 1, y0 - 1, y0 + h, OUTLINE)
+    c.vline(x0 + w, y0 - 1, y0 + h, OUTLINE)
+    c.hline(x0 - 1, x0 + w, y0 - 1, OUTLINE)
+    c.hline(x0 - 1, x0 + w, y0 + h, OUTLINE)
+    # two white flip cards with a hinge ring on top and a fold line across the middle
+    for cx in (x0 + 3, x0 + 22):
+        c.rect(cx, y0 + 4, 15, 19, WHITE)
+        c.hline(cx, cx + 14, y0 + 13, SNOW_SHADE)
+        c.vline(cx - 1, y0 + 4, y0 + 22, OUTLINE)
+        c.vline(cx + 15, y0 + 4, y0 + 22, OUTLINE)
+        c.hline(cx - 1, cx + 15, y0 + 23, OUTLINE)
+        c.hline(cx - 1, cx + 15, y0 + 3, OUTLINE)
+        for rx in (cx + 3, cx + 11):
+            c.rect(rx, y0 + 1, 2, 3, PLAQUE_DARK)
+    # little colour tabs: green = you (left card), red = them (right card)
+    c.rect(x0 + 3, y0 + h - 3, 15, 2, GREEN)
+    c.rect(x0 + 22, y0 + h - 3, 15, 2, RED)
+    # shadow on the floor
+    c.hline(x0, x0 + w + 1, y0 + h + 8, FLOOR_SEAM)
 
 
 def draw_hall():
@@ -369,7 +384,7 @@ def draw_hall():
     draw_plaque(c)
     draw_wreath(c)
     draw_tree(c)
-    draw_crate(c)
+    draw_scoreboard(c)
     return c
 
 
@@ -539,8 +554,92 @@ def make_light():
     return c
 
 
-def save_sprite(name, canvas, height):
-    canvas.save_bmp(os.path.join(OUT, name + ".bmp"))
+METER_PALETTE = [OUTLINE, rgb("#283040"), rgb("#58c060"), rgb("#f8d040"), rgb("#f05030"), rgb("#f8f8f8"),
+                 rgb("#f8a8a8")]
+
+
+def make_meter():
+    """Power meter shown above you while you charge a smash: 32x8, 9 frames (empty .. full).
+    The last quarter is gold: release there (with good timing) for a PERFECT shot."""
+    out_, back, green, gold, red, white = METER_PALETTE[:6]
+    c = Canvas(32, 72)
+    for f in range(9):
+        y0 = f * 8
+        c.rect(0, y0 + 1, 32, 6, out_)
+        c.rect(1, y0 + 2, 30, 4, back)
+        fill = round(30 * f / 8)
+        for x in range(fill):
+            col = green if x < 22 else gold
+            c.rect(1 + x, y0 + 2, 1, 4, col)
+        c.vline(23, y0 + 2, y0 + 5, white)          # where "perfect" starts
+        if f == 8:
+            c.hline(1, 30, y0 + 2, white)
+    return c
+
+
+def make_burst():
+    """A star burst at the ball for a perfect hit: 16x16, 2 frames (big, fading)."""
+    out_, back, green, gold, red, white, pink = METER_PALETTE
+    c = Canvas(16, 32)
+    for f, r in ((0, 7), (1, 5)):
+        cx, cy = 8, f * 16 + 8
+        for i in range(8):
+            dx, dy = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)][i]
+            ln = r if i % 2 == 0 else r - 2
+            for k in range(2, ln + 1):
+                c.set(cx + dx * k, cy + dy * k, gold if k < ln - 1 else (white if f == 0 else pink))
+        c.rect(cx - 1, cy - 1, 3, 3, white)
+    return c
+
+
+def make_serve_bar():
+    """The serve bar is 64 px tall, made of two 8x32 pieces: frame 0 = bottom half, frame 1 = top half."""
+    out_, back = METER_PALETTE[0], METER_PALETTE[1]
+    c = Canvas(8, 64)
+    for f in range(2):
+        y0 = f * 32
+        c.rect(1, y0, 6, 32, out_)
+        c.rect(2, y0 + (0 if f == 0 else 1), 4, 31, back)
+    return c
+
+
+# Serve zones per difficulty (pixels from the middle of the target): perfect, strong, ok. Keep in sync
+# with serve_perfect / serve_strong / serve_ok in LEVELS (pingpong.cpp).
+SERVE_ZONES = [(2, 8, 14), (1, 7, 12), (1, 5, 10)]
+
+
+def make_serve_zones():
+    """8x32 frames (Easy, Medium, Hard): the target on the serve bar, centred on row 16:
+    red box = perfect, green = strong, gold = ok (anything else is weak)."""
+    out_, back, green, gold, red, white = METER_PALETTE[:6]
+    c = Canvas(8, 96)
+    for f, (perfect, strong, ok) in enumerate(SERVE_ZONES):
+        y0 = f * 32
+        for d in range(0, 16):
+            col = red if d <= perfect else green if d <= strong else gold if d <= ok else None
+            if col is None:
+                continue
+            for y in (y0 + 16 - d, y0 + 16 + d):
+                if 0 <= y - y0 < 32:
+                    c.rect(2, y, 4, 1, col)
+        # the red box sticks out of the bar a little, with white corners, so it's easy to see
+        c.rect(1, y0 + 16 - perfect, 6, 2 * perfect + 1, red)
+        for y in (y0 + 16 - perfect - 1, y0 + 16 + perfect + 1):
+            c.rect(1, y, 6, 1, white)
+    return c
+
+
+def make_serve_marks():
+    """8x8: the marker that climbs the bar."""
+    white = METER_PALETTE[5]
+    c = Canvas(8, 8)
+    c.rect(0, 3, 8, 2, white)
+    c.set(0, 2, white); c.set(0, 5, white); c.set(7, 2, white); c.set(7, 5, white)
+    return c
+
+
+def save_sprite(name, canvas, height, palette=None):
+    canvas.save_bmp(os.path.join(OUT, name + ".bmp"), palette=palette)
     write_json(os.path.join(OUT, name + ".json"), '{\n    "type": "sprite",\n    "height": %d\n}' % height)
 
 
@@ -571,8 +670,20 @@ def main():
         "pingpong_flake": (make_flake(), 8),
         "pingpong_light": (make_light(), 8),
     }
+    shared = []
+    for canvas, _ in sprites.values():
+        for col in canvas.colors():
+            if col not in shared:
+                shared.append(col)
+    assert len(shared) <= 15, f"the small ping pong sprites use {len(shared)} colours; they must share 15"
     for name, (canvas, h) in sprites.items():
-        save_sprite(name, canvas, h)
+        save_sprite(name, canvas, h, shared)
+    # The meter and the burst share one palette, so together they use one of the 16 sprite palettes.
+    save_sprite("pingpong_meter", make_meter(), 8, METER_PALETTE)
+    save_sprite("pingpong_burst", make_burst(), 16, METER_PALETTE)
+    save_sprite("pingpong_vbar", make_serve_bar(), 32, METER_PALETTE)
+    save_sprite("pingpong_vzone", make_serve_zones(), 32, METER_PALETTE)
+    save_sprite("pingpong_vmark", make_serve_marks(), 8, METER_PALETTE)
     print("hall: %d colours, %d unique tiles" % (len(hall.colors()), count_tiles(hall)))
     print("table: %d colours, %d unique tiles" % (len(table.colors()), count_tiles(table)))
 

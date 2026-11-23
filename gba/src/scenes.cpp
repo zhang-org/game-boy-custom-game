@@ -1,4 +1,4 @@
-﻿// Title screen and character select.
+// Title screen and character select.
 #include "bn_bg_palettes.h"
 #include "bn_color.h"
 #include "bn_keypad.h"

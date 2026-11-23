@@ -1031,11 +1031,20 @@ namespace
 
 void sb::sled_run()
 {
-    constexpr bn::string_view howto[] = {
-        "< > Steer down the hill",
-        "Dodge trees and rocks",
-        "Grab presents for points",
-        "A: Boost    B: Brake",
+    // Shown on the start screen (scroll with Up/Down) and in the pause menu. '#' = heading.
+    static constexpr bn::string_view howto[] = {
+        "#Steer",
+        "< > steer down the hill.",
+        "The sled slides a little,",
+        "so steer early!",
+        "A: a short boost",
+        "Hold B: brake",
+        "",
+        "#Score",
+        "Dodge trees, rocks and",
+        "snowmen. Grab presents",
+        "for points. You have",
+        "3 hearts.",
     };
 
     bn::bg_palettes::set_transparent_color(bn::color(29, 30, 31));

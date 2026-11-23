@@ -129,7 +129,7 @@ class Canvas:
 
 
 def write_json(path, text):
-    with open(path, "w") as f:
+    with open(path, "w", newline="\n") as f:     # same line endings on Windows and Mac
         f.write(text.strip() + "\n")
 
 
