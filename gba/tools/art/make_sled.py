@@ -13,8 +13,9 @@ Files (all names start with sled_ because Butano asset names are global):
   sled_fx.bmp         16x16 sprite, 3 frames: big sparkle, small sparkle, crash star.
   sled_puff.bmp       8x8 sprite, 3 frames: snow spray puffs (big to small).
   sled_track.bmp      32x8 sprite, 3 frames: runner tracks straight, drifting left, drifting right.
-  sled_course.bmp     32x32 sprite, 6 frames: red gate, blue gate, ramp, log (left half), log (right half),
+  sled_course.bmp     32x32 sprite, 5 frames: red gate, blue gate, log (left half), log (right half),
                       the sled's shadow (while it flies off a ramp).
+  sled_ramp.bmp       64x32 sprite: the wide snow ramp (same palette as sled_course).
   sled_banner.bmp     64x32 sprite, 2 frames: the finish banner's left and right halves.
 
 Pass a folder to also write PNG previews (scaled up) there.
@@ -531,23 +532,31 @@ def frame_gate(flag, flag_d):
 
 
 def frame_ramp():
-    """A snow kicker you ride up: 32x32, the lip (where you take off) at the top, foot at row 28."""
-    c = Canvas(32, 32)
+    """A wide snow kicker you ride up: 64x32, the lip (where you take off) at the top, foot at row 28.
+    The lip is 36 px wide and the foot 44 px, to match RAMP_HALF = 20 in sled.cpp (hit it with the middle
+    of the sled within 20 px of the middle of the ramp)."""
+    c = Canvas(64, 32)
     for y in range(12, 29):
         t = (y - 12) / 16
-        half = int(9 + 5 * t)
-        for x in range(16 - half, 16 + half):
-            col = WHITE if y < 15 else SNOW if x < 16 else SNOW_S
-            if x in (16 - half, 16 + half - 1):
+        half = int(18 + 4 * t)
+        for x in range(32 - half, 32 + half):
+            col = WHITE if y < 15 else SNOW if x < 32 else SNOW_S
+            if x in (32 - half, 32 + half - 1):
                 col = SNOW_D
             c.set(x, y, col)
-    for x in range(7, 25):                          # wooden lip
+    for x in range(13, 51):                         # wooden lip
         c.set(x, 12, WOOD)
         c.set(x, 13, WOOD_D)
     for y in range(18, 28, 3):                      # ridges showing the slope
-        for x in range(12, 21):
+        for x in range(22, 43):
             if (x + y) % 3:
                 c.set(x, y, SNOW_S)
+    for x in (16, 47):                              # little marker flags on the corners of the lip
+        for y in range(5, 12):
+            c.set(x, y, WOOD_D)
+        for y in range(5, 8):
+            for dx in range(1, 4 - (y - 5)):
+                c.set(x + (dx if x < 32 else -dx), y, GOLD)
     outline(c)
     return c
 
@@ -638,8 +647,9 @@ def main():
     save_sprite("sled_fx", [frame_sparkle(True), frame_sparkle(False), frame_crash()], preview_dir)
     save_sprite("sled_puff", [frame_puff(2), frame_puff(1), frame_puff(0)], preview_dir)
     save_sprite("sled_track", [frame_track(0), frame_track(-1), frame_track(1)], preview_dir)
-    save_sprite("sled_course", [frame_gate(RED, RED_D), frame_gate(BLUE, BLUE_D), frame_ramp(), frame_log(0),
+    save_sprite("sled_course", [frame_gate(RED, RED_D), frame_gate(BLUE, BLUE_D), frame_log(0),
                                 frame_log(1), frame_shadow()], preview_dir, COURSE_PAL)
+    save_sprite("sled_ramp", [frame_ramp()], preview_dir, COURSE_PAL)
     save_sprite("sled_banner", [frame_banner(0), frame_banner(1)], preview_dir, COURSE_PAL)
 
     bg = hill()

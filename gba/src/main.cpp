@@ -11,6 +11,14 @@ int main()
     sb::save_init();
     sb::set_player_character(sb::last_character());
 
+#ifdef SB_TEST_GAME
+    // Test builds only (make USERFLAGS=-DSB_TEST_GAME=2): skip the opening, character select and map and
+    // go straight into one game (the numbers are sb::game_id). Used with the headless harness.
+    while(true)
+    {
+        sb::game(SB_TEST_GAME).run();
+    }
+#else
     sb::title_scene();
     sb::character_select_scene(false);
 
@@ -18,4 +26,5 @@ int main()
     {
         sb::world_map_scene();
     }
+#endif
 }
