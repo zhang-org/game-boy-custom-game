@@ -9,7 +9,9 @@ namespace sb
 {
     namespace
     {
-        constexpr char save_tag[8] = { 'S', 'N', 'O', 'W', 'B', 'R', 'Y', '1' };
+        // The last letter is the save version. When a game's scoring changes, bump it and clear that
+        // game's old record in migrate() (old numbers would be unbeatable or meaningless).
+        constexpr char save_tag[8] = { 'S', 'N', 'O', 'W', 'B', 'R', 'Y', '2' };
         constexpr int slot_offsets[2] = { 0, 1024 };
         constexpr int max_games = 8;
 
@@ -51,12 +53,17 @@ namespace sb
 
         bool valid(const save_data& data)
         {
-            for(int i = 0; i < 8; ++i)
+            for(int i = 0; i < 7; ++i)
             {
                 if(data.tag[i] != save_tag[i])
                 {
                     return false;
                 }
+            }
+
+            if(data.tag[7] < '1' || data.tag[7] > save_tag[7])
+            {
+                return false;
             }
 
             if(data.checksum != checksum(data))
@@ -99,6 +106,35 @@ namespace sb
             g_data.last_character = 0;
             g_data.sequence = 0;
         }
+
+        void clear_record(int game)
+        {
+            high_score& entry = g_data.best[game];
+            entry.score = 0;
+            entry.character = -1;
+
+            for(char& c : entry.name)
+            {
+                c = 0;
+            }
+        }
+
+        // Brings an older save up to date. Returns true if anything changed.
+        bool migrate()
+        {
+            if(g_data.tag[7] == save_tag[7])
+            {
+                return false;
+            }
+
+            if(g_data.tag[7] < '2')
+            {
+                clear_record(GAME_PINGPONG);    // v2: ping pong scores are now a win streak
+            }
+
+            g_data.tag[7] = save_tag[7];
+            return true;
+        }
     }
 
     void save_init()
@@ -121,6 +157,13 @@ namespace sb
         else
         {
             set_defaults();
+            save_write();
+            save_write();
+            return;
+        }
+
+        if(migrate())
+        {
             save_write();
             save_write();
         }

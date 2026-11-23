@@ -539,8 +539,46 @@ def make_light():
     return c
 
 
-def save_sprite(name, canvas, height):
-    canvas.save_bmp(os.path.join(OUT, name + ".bmp"))
+METER_PALETTE = [OUTLINE, rgb("#283040"), rgb("#58c060"), rgb("#f8d040"), rgb("#f05030"), rgb("#f8f8f8"),
+                 rgb("#f8a8a8")]
+
+
+def make_meter():
+    """Power meter shown above you while you charge a smash: 32x8, 9 frames (empty .. full).
+    The last quarter is gold: release there (with good timing) for a PERFECT shot."""
+    out_, back, green, gold, red, white = METER_PALETTE[:6]
+    c = Canvas(32, 72)
+    for f in range(9):
+        y0 = f * 8
+        c.rect(0, y0 + 1, 32, 6, out_)
+        c.rect(1, y0 + 2, 30, 4, back)
+        fill = round(30 * f / 8)
+        for x in range(fill):
+            col = green if x < 22 else gold
+            c.rect(1 + x, y0 + 2, 1, 4, col)
+        c.vline(23, y0 + 2, y0 + 5, white)          # where "perfect" starts
+        if f == 8:
+            c.hline(1, 30, y0 + 2, white)
+    return c
+
+
+def make_burst():
+    """A star burst at the ball for a perfect hit: 16x16, 2 frames (big, fading)."""
+    out_, back, green, gold, red, white, pink = METER_PALETTE
+    c = Canvas(16, 32)
+    for f, r in ((0, 7), (1, 5)):
+        cx, cy = 8, f * 16 + 8
+        for i in range(8):
+            dx, dy = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)][i]
+            ln = r if i % 2 == 0 else r - 2
+            for k in range(2, ln + 1):
+                c.set(cx + dx * k, cy + dy * k, gold if k < ln - 1 else (white if f == 0 else pink))
+        c.rect(cx - 1, cy - 1, 3, 3, white)
+    return c
+
+
+def save_sprite(name, canvas, height, palette=None):
+    canvas.save_bmp(os.path.join(OUT, name + ".bmp"), palette=palette)
     write_json(os.path.join(OUT, name + ".json"), '{\n    "type": "sprite",\n    "height": %d\n}' % height)
 
 
@@ -573,6 +611,9 @@ def main():
     }
     for name, (canvas, h) in sprites.items():
         save_sprite(name, canvas, h)
+    # The meter and the burst share one palette, so together they use one of the 16 sprite palettes.
+    save_sprite("pingpong_meter", make_meter(), 8, METER_PALETTE)
+    save_sprite("pingpong_burst", make_burst(), 16, METER_PALETTE)
     print("hall: %d colours, %d unique tiles" % (len(hall.colors()), count_tiles(hall)))
     print("table: %d colours, %d unique tiles" % (len(table.colors()), count_tiles(table)))
 
