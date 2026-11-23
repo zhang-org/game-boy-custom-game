@@ -428,16 +428,29 @@ def paint_lights(c, px, py, w):
 
 def paint_roost(top, base):
     paint_house(top, 3, 3, WOOD, WOOD_D, wall=rgb("#c89060"), wall_d=WOOD_D, w=5, h=3)
-    # sleigh in the yard (the reindeer are sprites, so they can move)
-    px, py = 8 * CELL + 2, 5 * CELL + 6
+    # Santa's sleigh, facing right, full of presents. The two reindeer (sprites, see world_map.cpp:
+    # REINDEER_A/B) stand in front of it on its right, and the harness lines below join them up.
+    px, py = 8 * CELL + 1, 4 * CELL + 6
     base.ascii(px, py, [
-        "o..........oo...",
-        "orrrrrrrrrrrro..",
-        "orrGrrrrrrGrro..",
-        ".orrrrrrrrrrro..",
-        "..oooooooooooo..",
-        ".oYYYYYYYYYYYYo.",
-    ], {"o": OUTL, "r": RED, "G": GOLD, "Y": GOLD})
+        "......................",
+        "..rG.bb...............",
+        "..rGgbbb..............",
+        ".oooooooooooooo.......",
+        "oRRRRRRRRRRRRRRo....oo",
+        "oRRYRRRRRRRRRRRRo..oRo",
+        "oRRRRRRRRRRRRRRRRooRRo",
+        "oRRRRRRRRRRRRRRRRRRRo.",
+        ".oDDDDDDDDDDDDDDDDDo..",
+        "..oooooooooooooooooo..",
+        "...o....o.....o.......",
+        "oYYYYYYYYYYYYYYYYYYYYo",
+        ".oooooooooooooooooooo.",
+    ], {"o": OUTL, "R": RED, "D": RED_D, "Y": GOLD, "G": GREEN, "g": GREEN_D, "r": RED_L, "b": BLUE})
+    # harness: gold lines from the front of the sleigh to the two reindeer
+    for (x0, y0, x1, y1) in ((px + 20, py + 6, 169, 68), (px + 20, py + 7, 179, 82)):
+        steps = max(abs(x1 - x0), abs(y1 - y0))
+        for i in range(steps + 1):
+            base.set(x0 + (x1 - x0) * i // steps, y0 + (y1 - y0) * i // steps, GOLD)
 
 
 def paint_workshop(c):
@@ -455,46 +468,77 @@ def paint_workshop(c):
 
 
 def paint_big_paddle(c, cx, cy):
-    """A giant table tennis bat standing on the roof, tilted a little, with a ball."""
-    RUBBER, RUBBER_D, RUBBER_L = rgb("#e83838"), rgb("#a02030"), rgb("#ff9090")
-    TAPE = rgb("#303038")
+    """A giant table tennis bat leaning on the roof, tilted, drawn by rotating a real paddle shape:
+    a round blade (red rubber, thin black edge, a visible wooden side for thickness) and a flared handle."""
+    import math
+    RUBBER, RUBBER_D, RUBBER_L = rgb("#e83838"), rgb("#b02838"), rgb("#ff8c8c")
+    EDGE, SIDE = rgb("#303038"), rgb("#c89058")
+    angle = math.radians(-28)                      # leaning to the right
+    ca, sa = math.cos(angle), math.sin(angle)
+    RX, RY = 12.5, 13.5                            # blade half-width / half-height
+    HL = 14                                         # handle length below the blade
+
+    def shape(u, v):
+        """What is at local point (u, v)? (v grows down the handle.)"""
+        d = (u / RX) ** 2 + (v / RY) ** 2
+        if d <= 1.0:
+            if d > 0.86:
+                return "edge"
+            if u < -0.25 * RX and v < -0.2 * RY and d < 0.55 and d > 0.25:
+                return "shine"
+            return "rubber_d" if (u * 0.7 + v) > 0.55 * RY else "rubber"
+        if RY - 3 <= v <= RY + HL:
+            t = (v - (RY - 3)) / (HL + 3)
+            half = 2.2 + 1.6 * t * t                  # the grip flares out at the end
+            if abs(u) <= half:
+                if v >= RY + HL - 1.5:
+                    return "cap"
+                return "grip_l" if int(v) % 4 == 0 else "grip"
+        return None
+
+    def raster(ox, oy, side):
+        for y in range(-26, 27):
+            for x in range(-26, 27):
+                u = x * ca + y * sa
+                v = -x * sa + y * ca
+                what = shape(u, v)
+                if what is None:
+                    continue
+                if side:
+                    col = SIDE if what in ("edge", "rubber", "rubber_d", "shine") else WOOD_D
+                else:
+                    col = {"edge": EDGE, "rubber": RUBBER, "rubber_d": RUBBER_D, "shine": RUBBER_L,
+                           "grip": WOOD, "grip_l": WOOD_L, "cap": WOOD_D}[what]
+                c.set(cx + ox + x, cy + oy + y, col)
+
     # shadow on the roof
-    c.ellipse(cx + 4, cy + 30, 15, 3, rgb("#3868b0"))
-    # handle: flared wooden grip with the end cap
-    for i in range(16):
-        w = 3 + (i * 2) // 15            # gets a little wider towards the end (flare)
-        c.rect(cx - w, cy + 13 + i, 2 * w + 1, 1, WOOD_L if i % 5 == 4 else WOOD)
-        c.set(cx - w - 1, cy + 13 + i, OUTL)
-        c.set(cx + w + 1, cy + 13 + i, OUTL)
-    c.hline(cx - 6, cx + 6, cy + 29, OUTL)
-    c.rect(cx - 5, cy + 27, 11, 2, WOOD_D)
-    # throat: the wooden neck joining the blade and the handle
-    for i in range(6):
-        c.hline(cx - 8 + i, cx + 8 - i, cy + 8 + i, WOOD)
-        c.set(cx - 9 + i, cy + 8 + i, OUTL)
-        c.set(cx + 9 - i, cy + 8 + i, OUTL)
-    # blade edge (thickness): wood, offset down-right so it looks 3D
-    c.ellipse(cx + 3, cy + 3, 16, 13, WOOD_D, OUTL)
-    # blade: black edge tape, then red rubber with a shine
-    c.ellipse(cx, cy, 16, 13, TAPE, OUTL)
-    c.ellipse(cx, cy, 14, 11, RUBBER)
-    c.ellipse(cx, cy, 14, 11, RUBBER)
-    for dx in range(-12, 13):            # little bumps of the pimpled rubber
-        for dy in range(-9, 10):
-            if (dx + dy) % 4 == 0 and (dx * dx) / 169.0 + (dy * dy) / 100.0 < 0.8:
-                c.set(cx + dx, cy + dy, RUBBER_D)
-    c.ellipse(cx - 6, cy - 5, 4, 2, RUBBER_L)
-    c.set(cx - 10, cy - 1, RUBBER_L)
-    # ball with a tiny shadow
-    c.ellipse(cx + 23, cy + 30, 3.5, 1.3, rgb("#3868b0"))
-    c.ellipse(cx + 24, cy - 8, 4, 4, SPARK, OUTL)
-    c.set(cx + 23, cy - 9, rgb("#c8d8f0"))
-    c.set(cx + 25, cy - 7, rgb("#c8d8f0"))
+    c.ellipse(cx + 6, cy + 24, 15, 3, rgb("#3868b0"))
+    # the side of the bat (its thickness) first, then the face on top
+    raster(2, 2, True)
+    raster(1, 1, True)
+    raster(0, 0, False)
+    # outline everything
+    marks = []
+    for y in range(cy - 30, cy + 31):
+        for x in range(cx - 30, cx + 31):
+            if c.get(x, y) in (None, BLUE, BLUE_D, SNOW, SNOW_S, rgb("#3868b0")):
+                if any(c.get(x + dx, y + dy) in (RUBBER, RUBBER_D, RUBBER_L, EDGE, SIDE, WOOD, WOOD_L, WOOD_D)
+                       for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+                    marks.append((x, y))
+    for x, y in marks:
+        c.set(x, y, OUTL)
+    # the ball, flying past
+    bx, by = cx - 20, cy - 10
+    c.ellipse(bx, by, 3.5, 3.5, SPARK, OUTL)
+    c.set(bx - 1, by - 1, rgb("#ffffff"))
+    c.set(bx + 1, by + 1, rgb("#c8d8f0"))
+    for i in range(3):
+        c.set(bx - 6 - i * 3, by + 2 + i, rgb("#c8d8f0"))
 
 
 def paint_rec_hall(c):
     def sign(c, px, py, pw, ph):
-        paint_big_paddle(c, px + pw // 2 - 6, py - 4)
+        paint_big_paddle(c, px + pw // 2 + 4, py - 2)
         paint_lights(c, px + 4, py + ph // 2 - 1, pw - 8)
     paint_house(c, 23, 12, BLUE, BLUE_D, wall=rgb("#e8e0f0"), w=5, h=3, sign=sign)
     x0, x1, top, base = OBJECTS[-1]

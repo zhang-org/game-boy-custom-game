@@ -321,9 +321,8 @@ namespace sb
             bn::sprite_ptr horse = bn::sprite_items::world_horse.create_sprite(HORSE_X, HORSE_Y);
             horse.set_camera(camera);
             sort_sprite(horse, false);
-            bn::sprite_ptr reindeer_a = bn::sprite_items::world_reindeer.create_sprite(150 - HALF_MAP, 62 - HALF_MAP);
-            bn::sprite_ptr reindeer_b = bn::sprite_items::world_reindeer.create_sprite(176 - HALF_MAP, 72 - HALF_MAP);
-            reindeer_b.set_horizontal_flip(true);
+            bn::sprite_ptr reindeer_a = bn::sprite_items::world_reindeer.create_sprite(164 - HALF_MAP, 68 - HALF_MAP);
+            bn::sprite_ptr reindeer_b = bn::sprite_items::world_reindeer.create_sprite(174 - HALF_MAP, 82 - HALF_MAP);
 
             reindeer_a.set_camera(camera);
             sort_sprite(reindeer_a, false);
