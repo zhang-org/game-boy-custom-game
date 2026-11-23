@@ -1711,7 +1711,8 @@ namespace
                                        sb::player_character());
         sb::play_jingle(record || game.won() ? bn::music_items::jingle_record : bn::music_items::jingle_over);
 
-        sb::panel(3, 0, 24, 15);
+        // Everything fits in the box (rows 0..13) so the menu below (rows 14..19) doesn't cover it.
+        sb::panel(3, 0, 24, 14);
         sb::label title, result, detail, stats, heading, lines[LEVEL_COUNT], record_label;
 
         bn::string<40> text;
@@ -1728,7 +1729,7 @@ namespace
             text.append(" won");
         }
 
-        title.set(0, -70, text, game.won() ? sb::text_color::BLUE : sb::text_color::RED, sb::align::CENTER);
+        title.set(0, -71, text, game.won() ? sb::text_color::BLUE : sb::text_color::RED, sb::align::CENTER);
 
         bn::string<40> line(LEVELS[game.level()].name);
         line.append(": ");
@@ -1738,20 +1739,20 @@ namespace
         line.append(game.won() ? "  (by " : "  (");
         line.append(time_text(gap));
         line.append(game.won() ? "s)" : "s behind)");
-        result.set(0, -56, line, sb::text_color::DARK, sb::align::CENTER);
+        result.set(0, -59, line, sb::text_color::DARK, sb::align::CENTER);
 
         bn::string<40> rhythm("Perfect beats ");
         rhythm.append(sb::to_text(game.perfects()));
         rhythm.append("/");
         rhythm.append(sb::to_text(game.beats()));
-        detail.set(0, -44, rhythm, sb::text_color::DARK, sb::align::CENTER);
+        detail.set(0, -48, rhythm, sb::text_color::DARK, sb::align::CENTER);
 
         bn::string<40> jumps("Clean jumps ");
         jumps.append(sb::to_text(game.jumps_clean()));
         jumps.append("/");
         jumps.append(sb::to_text(game.jumps_total()));
-        stats.set(0, -32, jumps, sb::text_color::DARK, sb::align::CENTER);
-        heading.set(0, -18, "{ Best times {", sb::text_color::RED, sb::align::CENTER);
+        stats.set(0, -37, jumps, sb::text_color::DARK, sb::align::CENTER);
+        heading.set(0, -25, "{ Best times {", sb::text_color::RED, sb::align::CENTER);
 
         for(int l = 0; l < LEVEL_COUNT; ++l)
         {
@@ -1770,14 +1771,14 @@ namespace
                 best.append("---");
             }
 
-            lines[l].set(-72, -4 + l * 12, best, l == game.level() ? sb::text_color::BLUE : sb::text_color::DARK);
+            lines[l].set(-72, -13 + l * 11, best, l == game.level() ? sb::text_color::BLUE : sb::text_color::DARK);
         }
 
         for(int t = 0; t < 50; ++t)
         {
             if(record && t % 20 == 0)
             {
-                record_label.set(0, 34, "{ NEW RECORD! {", sb::text_color::YELLOW, sb::align::CENTER);
+                record_label.set(0, 21, "{ NEW RECORD! {", sb::text_color::YELLOW, sb::align::CENTER);
             }
 
             sb::update();
@@ -1789,7 +1790,7 @@ namespace
         }
 
         constexpr bn::string_view items[] = { "Race again", "Back to map" };
-        int choice = sb::menu(8, 15, items, 0, true);
+        int choice = sb::menu(8, 14, items, 0, true);
         sb::panel_clear();
         return choice == 0;
     }
