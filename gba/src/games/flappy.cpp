@@ -1,8 +1,11 @@
-// Jingle Flap: ride a flying reindeer between snowy chimneys and icicle clouds over the rooftops.
+// Jingle Flap: ride a flying reindeer between snowy chimneys and icicle clouds over the rooftops, on a
+// world tour: St. Louis, Gainesville, Seattle, the Bay Area, then round again (a new city every 10 gaps).
 //
-// Controls: A (or Up) flaps. Start pauses. +1 point for every gap you fly through.
-// Art: tools/art/make_flappy.py (graphics/flappy/). Song: flappy_song.
+// Controls: A (or Up) flaps. Start pauses. +1 point for every gap you fly through, +2 for a candy cane.
+// Art: tools/art/make_flappy.py, tools/art/make_flappy_cities.py (graphics/flappy/). Song: flappy_song.
 #include "bn_bg_palettes.h"
+#include "bn_blending.h"
+#include "bn_optional.h"
 #include "bn_color.h"
 #include "bn_fixed.h"
 #include "bn_keypad.h"
@@ -23,7 +26,11 @@
 #include "bn_sound_items.h"
 #include "bn_regular_bg_items_flappy_roofs.h"
 #include "bn_regular_bg_items_flappy_sky.h"
-#include "bn_regular_bg_items_flappy_town.h"
+#include "bn_regular_bg_items_flappy_city_gnv.h"
+#include "bn_regular_bg_items_flappy_city_sea.h"
+#include "bn_regular_bg_items_flappy_city_sf.h"
+#include "bn_regular_bg_items_flappy_city_stl.h"
+#include "bn_sprite_items_flappy_candy.h"
 #include "bn_sprite_items_flappy_chimney.h"
 #include "bn_sprite_items_flappy_chimney_top.h"
 #include "bn_sprite_items_flappy_cloud.h"
@@ -41,12 +48,12 @@
 
 namespace
 {
-    // ------------------------------------------------------------------ tuning (start EASY: kids play this)
+    // ------------------------------------------------------------------ tuning
 
-    // Flying
-    constexpr bn::fixed GRAVITY = 0.11;            // pixels/frame^2 pulling down: higher = falls faster
-    constexpr bn::fixed FLAP_SPEED = -2.4;         // vertical speed right after a flap (negative = up): more negative = bigger hop
-    constexpr bn::fixed MAX_FALL_SPEED = 2.8;      // pixels/frame: the fastest the reindeer can drop
+    // Flying: snappy (falls fast, a strong hop) so it's easy to control
+    constexpr bn::fixed GRAVITY = 0.19;            // pixels/frame^2 pulling down: higher = falls faster
+    constexpr bn::fixed FLAP_SPEED = -3.1;         // vertical speed right after a flap (negative = up): more negative = bigger hop
+    constexpr bn::fixed MAX_FALL_SPEED = 4.2;      // pixels/frame: the fastest the reindeer can drop
     constexpr int PLAYER_X = -56;                  // screen x of the reindeer (fixed; the world scrolls past)
     constexpr int CEILING_Y = -60;                 // reindeer can't fly higher than this (no penalty, it just stops)
     constexpr int GROUND_Y = 58;                   // screen y of the snowy rooftops: touching it = game over
@@ -57,19 +64,33 @@ namespace
     constexpr int HIT_BOTTOM = 6;                  // pixels below centre (hooves can dip into chimney snow)
     constexpr int OBSTACLE_HALF_W = 11;            // collision half width of chimneys and clouds (art is 12-15)
 
-    // Scrolling and obstacles
-    constexpr bn::fixed START_SCROLL = 0.9;        // pixels/frame the world moves at the start: higher = harder
-    constexpr bn::fixed SCROLL_STEP = 0.1;         // added to the scroll speed every SPEEDUP_EVERY points
-    constexpr bn::fixed MAX_SCROLL = 1.5;          // scroll speed never goes above this
-    constexpr int SPEEDUP_EVERY = 10;              // points between speed-ups ("Faster!")
-    constexpr int START_GAP = 74;                  // pixels of open air between top and bottom obstacle at the start
+    // Scrolling and obstacles: it starts brisk and keeps getting faster, with tighter gaps
+    constexpr bn::fixed START_SCROLL = 1.25;       // pixels/frame the world moves at the start: higher = harder
+    constexpr bn::fixed SCROLL_STEP = 0.13;        // added to the scroll speed every SPEEDUP_EVERY gaps
+    constexpr bn::fixed MAX_SCROLL = 2.5;          // scroll speed never goes above this
+    constexpr int SPEEDUP_EVERY = 10;              // gaps between speed-ups (also when the city changes)
+    constexpr int START_GAP = 66;                  // pixels of open air between top and bottom obstacle at the start
     constexpr int GAP_STEP = 3;                    // gap gets this much smaller at every speed-up
-    constexpr int MIN_GAP = 58;                    // the gap never gets smaller than this
-    constexpr int COLUMN_SPACING = 124;            // pixels between obstacle columns: bigger = more time to react
+    constexpr int MIN_GAP = 50;                    // the gap never gets smaller than this ...
+    constexpr int TIGHT_EVERY = 4;                 // ... except every 4th column, which is tighter still:
+    constexpr int TIGHT_SHRINK = 8;                //     this many pixels smaller
+    constexpr int TIGHTEST_GAP = 44;               //     but never below this
+    constexpr int COLUMN_SPACING = 112;            // pixels between obstacle columns: bigger = more time to react
     constexpr int FIRST_COLUMN_X = 190;            // where the first column starts (screen right edge is 120)
     constexpr int MAX_GAP_SHIFT = 36;              // max up/down jump of the gap between neighbouring columns
     constexpr int MIN_CLOUD = 8;                   // a top cloud always reaches at least this far into the screen
     constexpr int MIN_CHIMNEY = 10;                // a chimney always sticks up at least this far above the roofs
+
+    // Candy canes: bonus points in risky spots (right next to a cloud or a chimney)
+    constexpr int CANDY_CHANCE = 35;               // % of columns that have one
+    constexpr int CANDY_POINTS = 2;
+    constexpr int CANDY_EDGE = 9;                  // how far from the edge of the gap it floats
+    constexpr int CANDY_REACH = 11;                // how close the reindeer must get to grab it
+
+    // World tour: a new city every SPEEDUP_EVERY gaps
+    constexpr int CITY_FADE_FRAMES = 24;           // the old skyline fades out, the new one fades in
+    constexpr int CITY_ENTER_X = -166;             // skyline position when a city starts: its landmark comes in from the right
+    constexpr int CITY_START_X = -296;             // ... and at the very start of a round (the Arch is on screen)
 
     // Parallax (fraction of the obstacle scroll speed)
     constexpr bn::fixed SKY_PARALLAX = 0.08;       // stars
@@ -100,6 +121,8 @@ namespace
         int gap_bottom = 0;  // screen y of the top of the chimney
         bool scored = false;
         bn::vector<bn::sprite_ptr, 6> sprites;
+        bn::optional<bn::sprite_ptr> candy;
+        int candy_y = 0;
     };
 
     void build_column(column& c, bn::fixed x, int gap_centre, int gap)
@@ -109,6 +132,15 @@ namespace
         c.gap_bottom = c.gap_top + gap;
         c.scored = false;
         c.sprites.clear();
+        c.candy.reset();
+
+        // Sometimes a candy cane, close to the top or the bottom of the gap.
+        if(sb::rand_range(0, 99) < CANDY_CHANCE)
+        {
+            c.candy_y = sb::rand_range(0, 1) ? c.gap_top + CANDY_EDGE : c.gap_bottom - CANDY_EDGE;
+            c.candy = bn::sprite_items::flappy_candy.create_sprite(x, c.candy_y);
+            c.candy->set_bg_priority(2);
+        }
 
         int ix = x.round_integer();
 
@@ -145,6 +177,11 @@ namespace
         {
             sprite.set_x(c.x);
         }
+
+        if(c.candy)
+        {
+            c.candy->set_x(c.x);
+        }
     }
 
     bn::fixed clamp(bn::fixed v, bn::fixed lo, bn::fixed hi)
@@ -169,11 +206,38 @@ namespace
         bn::fixed vy = 0;
         bn::fixed scroll = START_SCROLL;
         int gap = START_GAP;
-        int score = 0;
+        int score = 0;       // gaps + candy canes
+        int gaps = 0;        // gaps flown through (speed-ups and cities go by this)
         int level = 0;
         int last_gap_centre = -12;
         int flap_timer = 0;
+        int columns_built = 0;
     };
+
+    // The gap for the next column (every TIGHT_EVERY-th one is tighter).
+    int next_gap(round_state& s)
+    {
+        ++s.columns_built;
+        return s.columns_built % TIGHT_EVERY == 0 ? bn::max(s.gap - TIGHT_SHRINK, TIGHTEST_GAP) : s.gap;
+    }
+
+    constexpr int CITY_COUNT = 4;
+    constexpr const char* CITY_NAMES[CITY_COUNT] = { "St. Louis", "Gainesville", "Seattle", "Bay Area" };
+
+    const bn::regular_bg_item& city_item(int city)
+    {
+        switch(city)
+        {
+        case 1:
+            return bn::regular_bg_items::flappy_city_gnv;
+        case 2:
+            return bn::regular_bg_items::flappy_city_sea;
+        case 3:
+            return bn::regular_bg_items::flappy_city_sf;
+        default:
+            return bn::regular_bg_items::flappy_city_stl;
+        }
+    }
 
     int gap_centre_range_lo(int gap)
     {
@@ -185,10 +249,10 @@ namespace
         return GROUND_Y - MIN_CHIMNEY - gap / 2;
     }
 
-    int next_gap_centre(round_state& s)
+    int next_gap_centre(round_state& s, int gap)
     {
-        int lo = gap_centre_range_lo(s.gap);
-        int hi = gap_centre_range_hi(s.gap);
+        int lo = gap_centre_range_lo(gap);
+        int hi = gap_centre_range_hi(gap);
         int from = bn::max(lo, s.last_gap_centre - MAX_GAP_SHIFT);
         int to = bn::min(hi, s.last_gap_centre + MAX_GAP_SHIFT);
         int centre = from >= to ? (lo + hi) / 2 : sb::rand_range(from, to);
@@ -231,16 +295,24 @@ void sb::flappy_run()
         "Fly through the gaps",
         "between the chimneys and",
         "the icy clouds: 1 point",
-        "for every gap.",
-        "It speeds up as you go!",
+        "for every gap. Grab candy",
+        "canes for 2 more points.",
+        "",
+        "#World tour",
+        "Every 10 gaps you fly to",
+        "a new city, and it gets",
+        "faster. Some gaps are",
+        "extra tight: watch out!",
     };
 
     // ---- Scene
     bn::bg_palettes::set_transparent_color(bn::color(2, 3, 8));
     bn::regular_bg_ptr sky = bn::regular_bg_items::flappy_sky.create_bg(0, 0);
     sky.set_priority(3);
-    bn::regular_bg_ptr town = bn::regular_bg_items::flappy_town.create_bg(0, 0);
+    bn::regular_bg_ptr town = bn::regular_bg_items::flappy_city_stl.create_bg(0, 0);
     town.set_priority(2);
+    int city = 0;
+    int city_fade = 0;       // counts down while the skyline changes (fade out, swap, fade in)
     bn::regular_bg_ptr roofs = bn::regular_bg_items::flappy_roofs.create_bg(0, 0);
     roofs.set_priority(1);
 
@@ -314,9 +386,18 @@ void sb::flappy_run()
         for(int i = 0; i < COLUMN_COUNT; ++i)
         {
             columns.emplace_back();
-            build_column(columns.back(), FIRST_COLUMN_X + i * COLUMN_SPACING, next_gap_centre(state), state.gap);
+            int gap = next_gap(state);
+            build_column(columns.back(), FIRST_COLUMN_X + i * COLUMN_SPACING, next_gap_centre(state, gap), gap);
             place_column(columns.back());
         }
+
+        // Every round starts in St. Louis, with the Arch in view.
+        city = 0;
+        city_fade = 0;
+        town.set_item(city_item(0));
+        town.set_blending_enabled(false);
+        town_x = CITY_START_X;
+        town.set_x(town_x);
 
         set_reindeer_frame(REINDEER_GLIDE);
         place_player(state.y, 0);
@@ -425,7 +506,8 @@ void sb::flappy_run()
             {
                 if(c.x < -120 - 20)
                 {
-                    build_column(c, rightmost + COLUMN_SPACING, next_gap_centre(state), state.gap);
+                    int gap = next_gap(state);
+                    build_column(c, rightmost + COLUMN_SPACING, next_gap_centre(state, gap), gap);
                     rightmost = c.x;
                 }
 
@@ -441,15 +523,34 @@ void sb::flappy_run()
             {
                 bn::fixed dx = c.x - PLAYER_X;
 
+                // Candy cane?
+                if(c.candy && bn::abs(dx) < CANDY_REACH && bn::abs(py - c.candy_y) < CANDY_REACH)
+                {
+                    c.candy.reset();
+                    state.score += CANDY_POINTS;
+                    sfx(bn::sound_items::sfx_catch);
+                    show_score();
+                    notice_label.set(PLAYER_X + 10, py - 22, "+2", text_color::YELLOW, align::CENTER);
+                    notice_timer = 30;
+                }
+
                 if(! c.scored && dx < 0)
                 {
                     c.scored = true;
                     ++state.score;
+                    ++state.gaps;
                     sfx(bn::sound_items::sfx_point);
                     show_score();
 
-                    if(state.score % SPEEDUP_EVERY == 0)
+                    if(state.gaps % SPEEDUP_EVERY == 0)
                     {
+                        // Next stop on the world tour.
+                        city_fade = CITY_FADE_FRAMES * 2;
+                        town.set_blending_enabled(true);
+                        bn::string<32> stop("Next stop: ");
+                        stop.append(CITY_NAMES[(city + 1) % CITY_COUNT]);
+                        notice_label.set(24, -56, stop, text_color::YELLOW, align::CENTER);
+                        notice_timer = FASTER_NOTICE_FRAMES + 30;
                         bn::fixed faster = START_SCROLL + SCROLL_STEP * (state.level + 1);
 
                         if(faster <= MAX_SCROLL || state.gap > MIN_GAP)
@@ -457,8 +558,7 @@ void sb::flappy_run()
                             ++state.level;
                             state.scroll = bn::min(faster, MAX_SCROLL);
                             state.gap = bn::max(START_GAP - GAP_STEP * state.level, MIN_GAP);
-                            notice_label.set(24, -40, "Faster!", text_color::YELLOW, align::CENTER);
-                            notice_timer = FASTER_NOTICE_FRAMES;
+                            hint_label.set(24, -40, "Faster!", text_color::WHITE, align::CENTER);
                             sfx(bn::sound_items::sfx_whoosh);
                         }
                     }
@@ -479,6 +579,31 @@ void sb::flappy_run()
             if(notice_timer > 0 && --notice_timer == 0)
             {
                 notice_label.clear();
+                hint_label.clear();
+            }
+
+            // The skyline changes: fade the old city out, swap, fade the new one in.
+            if(city_fade > 0)
+            {
+                --city_fade;
+
+                if(city_fade == CITY_FADE_FRAMES)
+                {
+                    city = (city + 1) % CITY_COUNT;
+                    town.set_item(city_item(city));
+                    town_x = CITY_ENTER_X;
+                    town.set_x(town_x);
+                }
+
+                bn::fixed alpha = city_fade > CITY_FADE_FRAMES ?
+                                  bn::fixed(city_fade - CITY_FADE_FRAMES) / CITY_FADE_FRAMES :
+                                  bn::fixed(CITY_FADE_FRAMES - city_fade) / CITY_FADE_FRAMES;
+                bn::blending::set_transparency_alpha(alpha);
+
+                if(city_fade == 0)
+                {
+                    town.set_blending_enabled(false);
+                }
             }
 
             update();
