@@ -470,9 +470,11 @@ void sb::flappy_run()
 
     // Pause box; hides our text so it doesn't show through the box.
     auto pause = [&]() {
+        score_label.set_visible(false);
         notice_label.set_visible(false);
         hint_label.set_visible(false);
         bool leave = game_pause();
+        score_label.set_visible(true);
         notice_label.set_visible(true);
         hint_label.set_visible(true);
         return leave;
@@ -753,6 +755,7 @@ void sb::flappy_run()
         // ---- Crash: flash, then tumble down onto the rooftops.
         sfx(bn::sound_items::sfx_crash);
         notice_label.clear();
+        hint_label.clear();     // e.g. "Faster!" (its timer stops counting once you crash)
         set_reindeer_frame(REINDEER_CRASH);
         bn::bg_palettes::set_fade(bn::color(31, 31, 31), bn::fixed(0.5));
         bn::sprite_palettes::set_fade(bn::color(31, 31, 31), bn::fixed(0.5));
