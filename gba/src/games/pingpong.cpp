@@ -129,6 +129,7 @@ namespace
     constexpr bn::fixed CHARGE_REACH_STRONG = 6;// your forehand (A) reaches this much further right, backhand (B) left
     constexpr bn::fixed CHARGE_REACH_WEAK = 8;  // ... and this much less on the other side
     constexpr bn::fixed CHARGE_REACH_FRONT = 4; // charged swings reach a little further toward the net
+    constexpr int TIMING_HINT_FRAMES = 45;      // how long "Early" / "Late" shows after a smash that wasn't PERFECT
     constexpr int PERFECT_CHARGE = 75;          // % of the meter needed for a PERFECT shot (the gold part)
     // Where a charged shot goes: forehand (A) to the LEFT side of the table, backhand (B) to the RIGHT.
     // Hold the same direction to go wider, the other direction to go closer to the middle.
@@ -705,6 +706,8 @@ namespace
         bn::sprite_ptr serve_zone = bn::sprite_items::pingpong_vzone.create_sprite(0, 0, 0);
         bn::sprite_ptr serve_marker = bn::sprite_items::pingpong_vmark.create_sprite(0, 0, 0);
         sb::label my_score_label, cpu_score_label;
+        sb::label timing_label;
+        int timing_timer = 0;
         struct spectator
         {
             bn::sprite_ptr sprite;
@@ -1020,6 +1023,8 @@ namespace
             score_label.clear();
             my_score_label.clear();
             cpu_score_label.clear();
+            timing_label.clear();
+            timing_timer = 0;
             message_label.clear();
             hint_label.clear();
             message_timer = 0;
@@ -1140,6 +1145,11 @@ namespace
             if(! can_hit)
             {
                 // Swung at nothing (too early or too late).
+                if(st == state::RALLY && ! point_decided && hitter == CPU && bounces <= 1 && ball.z < me->z)
+                {
+                    show_timing_hint("Too early");
+                }
+
                 me->start_swing(me->x + me->charge_side * 12, me->center_y() - 4);
                 sb::sfx(bn::sound_items::sfx_whoosh);
                 stop_charging();
@@ -1185,7 +1195,20 @@ namespace
             {
                 sb::sfx(bn::sound_items::sfx_smash);
                 show_message(high ? "Smash!" : "Power shot!", sb::text_color::YELLOW, 36);
+
+                // Why it wasn't PERFECT: a small hint over your head.
+                const char* why = dz < -level->sweet_front ? "Early" : dz > level->sweet_back ? "Late" :
+                                  "More power";
+                show_timing_hint(why);
             }
+        }
+
+        // A small note over your head after a smash that wasn't PERFECT ("Early", "Late", "More power").
+        void show_timing_hint(const char* text)
+        {
+            timing_label.set(me->x.round_integer(), me->center_y() - 26, text, sb::text_color::WHITE,
+                             sb::align::CENTER);
+            timing_timer = TIMING_HINT_FRAMES;
         }
 
         void start_trail(bn::fixed x, bn::fixed y, int frames)
@@ -2026,6 +2049,11 @@ namespace
                 message_label.clear();
             }
 
+            if(timing_timer > 0 && --timing_timer == 0)
+            {
+                timing_label.clear();
+            }
+
             update_charge();
             bool me_moving = move_player();
             bool cpu_moving = move_cpu();
@@ -2367,6 +2395,7 @@ namespace
             message_label.set_visible(visible);
             hint_label.set_visible(visible);
             score_label.set_visible(visible);
+            timing_label.set_visible(visible);
             my_score_label.set_visible(visible);
             cpu_score_label.set_visible(visible);
         }
