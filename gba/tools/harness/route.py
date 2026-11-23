@@ -1,6 +1,6 @@
 """Prints harness commands that walk from the start square to a place's doorstep on the town map.
 
-    python3 tools/harness/route.py 4        # doorstep '4' (Gift Catch); 1..6 as in sb_games.h
+    python3 tools/harness/route.py 4        # doorstep '4' (Gift Tower); 1..6 as in sb_games.h
 Assumes a fresh walk from the start cell 'P' (the first map visit). One cell = 8 frames.
 """
 import re
