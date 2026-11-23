@@ -225,6 +225,7 @@ namespace
         bn::vector<int, 2> plate_dx;
         int refusals = 0;                       // at this jump (the second one moves you on past it)
         bool faulted = false;                   // knocked or splashed (counted once)
+        bool landed_on = false;                 // a jump came down on it (or just short): not a refusal
         bool skipped = false;
         bool done = false;                      // jumped (or knocked down): the next jump is up
     };
@@ -377,11 +378,13 @@ namespace
                 _distance += _speed * factor;
             }
 
+            bool was_airborne = _airborne;
             jump_physics();
 
             if(! _finished)
             {
-                refusal_check();    // after the jump, so an A press at the very last moment still jumps
+                // After the jump, so an A press at the very last moment still jumps.
+                refusal_check(was_airborne && ! _airborne);
                 collide();
 
                 if(_distance >= _finish_x)
@@ -827,7 +830,8 @@ namespace
         }
 
         // Running up to a jump on the ground without taking off: the horse refuses.
-        void refusal_check()
+        // `just_landed`: the horse came down from a jump this frame.
+        void refusal_check(bool just_landed)
         {
             jump_obj* j = next_jump();
 
@@ -841,6 +845,15 @@ namespace
 
             if(_distance.integer() + HORSE_HALF >= front - REFUSE_GAP)
             {
+                // Took off too early and came down on the fence (or right in front of it): that's a knocked
+                // pole (collide() counts it), not a refusal. The horse carries on over the knocked remains.
+                // (Water is judged on landing: coming down just short of it is still a refusal.)
+                if(j->kind != JK_WATER && (just_landed || j->landed_on))
+                {
+                    j->landed_on = true;
+                    return;
+                }
+
                 ++_refusals;
                 _refusal = REFUSAL_FRAMES;
                 _refusal_from = _distance;
