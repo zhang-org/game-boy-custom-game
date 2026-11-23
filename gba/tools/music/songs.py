@@ -98,16 +98,19 @@ JINGLE_RECORD = {
 }
 
 # ------------------------------------------------------------------------------------ games
-_flappy_chords = "F C Dm Bb F C Bb/C F"
+# Jingle Flap: a bright, quick sleigh-ride tune in G (16 bars), with jingle bells on the off-beats.
+_flappy_chords = "G D Em C G D C D Em C G D C D G G"
 FLAPPY = {
-    "bpm": 150,
+    "bpm": 160,
     "tracks": [
-        ("lead", 38,
-         "A4 - C5 A4 F4 - A4 C5 | E5 - D5 C5 G4 - . . | F4 - A4 D5 F5 - D5 A4 | A#4 - D5 F5 A#4 - . . |"
-         "C5 - F5 - A5 - G5 F5 | E5 - G5 - C5 - - - | D5 - A#4 - E5 - C5 - | F5 - - - F4 . . . |"),
-        ("bell", 20, arp(_flappy_chords, 4, "1 2 3 2 1 2 3 2")),
-        ("bass", 46, bass(_flappy_chords, "R . O . R . O .", 2)),
-        ("drums", 30, times("k . h . s . h k", 8)),
+        ("flute", 40,
+         "D5 - B4 - G4 - B4 D5 | F#5 - E5 D5 A4 - - - | G4 - B4 - E5 - D5 B4 | C5 - E5 - G5 - E5 - |"
+         "D5 - B4 - G4 A4 B4 - | A4 - F#4 - D4 - A4 - | G4 - E4 - C5 - B4 A4 | A4 - - - D5 - . . |"
+         "E5 - E5 - B4 - E5 - | G5 - E5 - C5 - E5 - | D5 - B4 - D5 - G5 - | F#5 - E5 - D5 - C5 - |"
+         "E5 - G5 - E5 - C5 - | D5 - F#5 - A5 - F#5 - | G5 - D5 - B4 - D5 - | G5 - - - . . . . |"),
+        ("bell", 18, arp(_flappy_chords, 4, "1 3 2 3 1 3 2 3")),
+        ("bass", 46, bass(_flappy_chords, "R . O . 5 . O .", 2)),
+        ("drums", 30, times("k j h j s j h j", 16)),
     ],
 }
 

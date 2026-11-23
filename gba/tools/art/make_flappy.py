@@ -12,7 +12,7 @@ Sprites
   flappy_moon         32x32: full moon
 Backgrounds (all wrap horizontally)
   flappy_sky          256x256: night sky gradient with stars
-  flappy_town         512x256: far-away houses with lit windows (slow parallax)
+  (the far-away skylines are in make_flappy_cities.py)
   flappy_roofs        512x256: snowy rooftops along the bottom with Christmas lights (the ground)
 """
 import math
@@ -672,7 +672,6 @@ def main():
     make_cloud()
     make_moon()
     make_sky()
-    make_town()
     make_roofs()
     print("Wrote Jingle Flap art to", os.path.normpath(OUT))
 
