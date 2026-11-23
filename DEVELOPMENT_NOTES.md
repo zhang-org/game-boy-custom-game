@@ -132,3 +132,27 @@ Raw sound-chip register writes are enough. Our channel split:
 - **Battery save** for high scores (MBC + SRAM).
 - **Real portraits:** PNG faces drawn in Aseprite or Piskel, converted with `png2asset`.
 - **Two-player games:** the Game Boy link cable, or pass-and-play turns.
+
+---
+
+## 10. GBA (Snowberry / Butano) gotchas
+
+Learned the hard way while building the GBA game in `gba/`:
+
+| Problem | What to do |
+|---|---|
+| `bn::fixed * bn::fixed` returns 0 for small factors | Butano multiplies two fixed values at half precision (6 bits after the point each), so a constant below about 0.016 (1/64) becomes 0. Pony Gallop's rubber band was silently 0. Use an int: `value * 6 / 1000` or `value / 150`. `bn::fixed / bn::fixed` cuts the divisor the same way. |
+| `bn::fixed` overflows above ~500 000 | The raw value is an int with 12 bits after the point. `distance * 100` overflowed once distances passed ~5000 px. Compare `.integer()` values instead. |
+| A game crashes with "division by zero" when the music starts | The sound bank is corrupt. Two Butano builds running at the same time in one folder broke the maxmod step (a 4 GB `build/bn_audio_soundbank.bin`). Build one at a time. |
+| Weird crashes right after switching branches or rebasing | The build folder can mix objects compiled against old headers (`game_info` and the save struct changed). Run `./build.sh clean` (Windows: delete `gba/build`) and rebuild. |
+| "No more sprite sort layers available" | At most 16 different (bg priority, z order) pairs among sprites, hidden ones included. Use a few shared z values per scene, never one per object or row. Ping Pong uses up to 13. |
+| "No more available colors" | 16 sprite palettes. **The town map uses 15-16** (10 family members each have their own palette, plus the world sprites, snow and up to 4 text colours). Anything new on the map must reuse a palette. Small sprites can share one palette: save them with the same palette list in the art script. |
+| A `bn::vector` silently stops adding when full | Sled Dash's Hard course lost its finish line this way. Use `BN_ASSERT(! v.full(), ...)` where dropping things would break the game. |
+| Text drawn over menus | HUD labels and HUD sprites at BG priority 0 draw over the UI boxes. Hide them while a box is open (pause, results) and before the intro. |
+
+**Test switches** (all off in normal builds; pass them as `make USERFLAGS=...`):
+- `SB_TEST_GAME=<id>` boots straight into one game.
+- `SB_RESOURCE_LOG` logs the peak sprites, palettes, tiles and CPU, with one `SCENE` line per scene.
+- Autopilots: `SLED_AUTOPILOT`, `HORSE_AUTOPILOT=1..3`, `FISHING_AUTOPILOT`, `CATCH_AUTOPILOT=N`, `SNOWBALL_AUTOPILOT`, `FLAPPY_AUTOPILOT`.
+
+With the headless harness (`gba/tools/harness/`), `mash N SEED` fuzzes with random buttons.

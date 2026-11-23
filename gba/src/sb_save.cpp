@@ -12,7 +12,10 @@ namespace sb
     {
         // The last letter is the save version. Older saves are converted in save_init():
         //   '1'/'2' (no extra records): everything is kept except the Ping Pong record (its scoring changed).
-        constexpr char save_tag[8] = { 'S', 'N', 'O', 'W', 'B', 'R', 'Y', '3' };
+        //   '3' (8 extra records): everything is kept; the instructions-read flags move from extra slot 7 to
+        //       the new last slot. Which game uses which slot: docs/decisions/0002-record-slots.md.
+        constexpr char save_tag[8] = { 'S', 'N', 'O', 'W', 'B', 'R', 'Y', '4' };
+        constexpr int v3_extra_count = 8;
         constexpr int slot_offsets[2] = { 0, 1024 };
         constexpr int max_games = 8;
 
@@ -31,6 +34,18 @@ namespace sb
             int music_on;
             int last_character;
             high_score extra[extra_record_count];
+            unsigned checksum;
+        };
+
+        // The layout of version 3, only read to convert old saves.
+        struct save_data_v3
+        {
+            char tag[8];
+            int sequence;
+            high_score best[max_games];
+            int music_on;
+            int last_character;
+            high_score extra[v3_extra_count];
             unsigned checksum;
         };
 
@@ -180,6 +195,37 @@ namespace sb
         }
 
         // An older save? Convert it.
+        save_data_v3 v3_slots[2];
+        bn::sram::read_offset(v3_slots[0], slot_offsets[0]);
+        bn::sram::read_offset(v3_slots[1], slot_offsets[1]);
+        bool v3_0 = valid(v3_slots[0], '3', '3');
+        bool v3_1 = valid(v3_slots[1], '3', '3');
+
+        if(v3_0 || v3_1)
+        {
+            const save_data_v3& old = v3_0 && (! v3_1 || v3_slots[0].sequence >= v3_slots[1].sequence) ?
+                                      v3_slots[0] : v3_slots[1];
+            set_defaults();
+
+            for(int i = 0; i < max_games; ++i)
+            {
+                g_data.best[i] = old.best[i];
+            }
+
+            for(int i = 0; i < v3_extra_count - 1; ++i)
+            {
+                g_data.extra[i] = old.extra[i];
+            }
+
+            g_data.extra[extra_record_count - 1] = old.extra[v3_extra_count - 1];   // instructions-read flags
+            g_data.music_on = old.music_on;
+            g_data.last_character = old.last_character;
+            g_data.sequence = old.sequence;
+            save_write();
+            save_write();
+            return;
+        }
+
         save_data_old old_slots[2];
         bn::sram::read_offset(old_slots[0], slot_offsets[0]);
         bn::sram::read_offset(old_slots[1], slot_offsets[1]);
@@ -244,8 +290,51 @@ namespace sb
         return submit(g_data.extra[slot], score, character);
     }
 
+    bn::string<40> score_record_text(int game, bool compact)
+    {
+        bn::string<40> text;
+
+        if(best_score(game) > 0)
+        {
+            text.append(to_text(best_score(game)));
+            text.append(compact ? "  " : " by ");
+            text.append(best_name(game));
+        }
+
+        return text;
+    }
+
+    bn::string<40> level_record_text(int first_slot, int levels, const char* const* level_names,
+                                     bn::string<16> (*value_text)(int value), bool compact)
+    {
+        bn::string<40> text;
+
+        for(int level = levels - 1; level >= 0; --level)
+        {
+            int value = extra_score(first_slot + level);
+
+            if(value > 0)
+            {
+                bn::string_view name = level_names[level];
+                text.append(compact && name == "Medium" ? "Med" : name);
+                text.append(" ");
+                text.append(value_text(value));
+                text.append(compact ? "  " : " by ");
+                text.append(extra_name(first_slot + level));
+                break;
+            }
+        }
+
+        return text;
+    }
+
     bn::string<40> best_record_text(int game, bool compact)
     {
+        if(sb::game(game).best_text)
+        {
+            return sb::game(game).best_text(compact);
+        }
+
         const char* by = compact ? "  " : " by ";
 
         bn::string<40> text;
@@ -299,14 +388,7 @@ namespace sb
             return text;
         }
 
-        if(best_score(game) > 0)
-        {
-            text.append(to_text(best_score(game)));
-            text.append(by);
-            text.append(best_name(game));
-        }
-
-        return text;
+        return score_record_text(game, compact);
     }
 
     // The flags live in the last extra record (its score is a bit mask, one bit per game), so the

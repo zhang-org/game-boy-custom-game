@@ -1,4 +1,4 @@
-"""Generates the Gift Catch art in gba/graphics/catch/.
+"""Generates the Gift Tower (was Gift Catch) art in gba/graphics/catch/.
 
     python3 tools/art/make_catch.py [PREVIEW_DIR]   (PREVIEW_DIR: also write scaled PNG previews there)
 
@@ -7,8 +7,11 @@ Files (all names start with catch_ because Butano asset names are global):
   catch_items    16x16 sprites, frames: 0-2 small presents, 3-4 big presents, 5-6 star present
                  (two sparkle frames), 7-8 coal (two grumpy frames)
   catch_basket   32x16 wicker basket held over the player's head, frames: 0 empty, 1 a few gifts, 2 full
+                 (not used since Gift Tower: the presents stack in your arms)
   catch_sleigh   64x32 Santa's sleigh + reindeer, facing right, 2 gallop frames
+  catch_parked   32x32 Santa's sleigh parked in the street (where you deliver), 0 normal, 1 sack glowing
   catch_popup    32x16 floating score numbers: +10 +20 +25 +30 +50 +75 +100 +150, +heart, -heart
+                 (not used since Gift Tower: the scores are text)
 """
 import os
 import sys
@@ -359,11 +362,51 @@ def sleigh(step):
     return c
 
 
+def parked_sleigh(glow):
+    """Santa's sleigh parked in the street, waiting for your stack: 32x32, runners on row 30, a big open
+    sack at the back. glow = the frame shown while you deliver (the sack shines)."""
+    c = Canvas(32, 32)
+    for y in range(19, 28):                         # body
+        x0 = 4 if y > 20 else 7
+        x1 = 29 - max(0, y - 24) * 2
+        c.hline(x0, x1, y, RED)
+    c.rect(2, 14, 5, 10, RED)                       # high back
+    c.hline(2, 6, 14, RED_S)
+    c.vline(6, 15, 22, RED_S)
+    c.hline(4, 29, 21, GOLD)                        # gold trim
+    c.hline(5, 26, 26, RED_S)
+    c.hline(5, 28, 30, GOLD_S)                      # runners
+    c.set(29, 29, GOLD_S)
+    c.set(30, 28, GOLD_S)
+    c.set(4, 29, GOLD_S)
+    c.vline(11, 28, 29, GOLD_S)
+    c.vline(24, 28, 29, GOLD_S)
+    # The open sack on the seat, with presents in it.
+    disc(c, 18, 14, 7.5, SACK)
+    for x, y in ((22, 17), (23, 16), (24, 15), (23, 18), (22, 19), (21, 19)):
+        c.set(x, y, SACK_S)
+    c.hline(12, 24, 8, SACK_S)                      # the open mouth of the sack
+    c.hline(13, 23, 7, GOLD if glow else SACK_S)
+    c.rect(13, 4, 4, 4, RED)                        # presents poking out
+    c.rect(18, 3, 4, 5, BLUE)
+    c.vline(15, 4, 7, GOLD)
+    c.vline(20, 3, 7, WHITE)
+    outline(c)
+    if glow:
+        for (x, y) in ((11, 2), (25, 1), (18, 0), (27, 5)):
+            c.set(x, y, GOLD_L)
+    return c
+
+
 def make_sleigh(previews):
     sheet = Canvas(64, 64)
     for i in range(2):
         sheet.blit(sleigh(i), 0, 32 * i)
     save_sprite(sheet, "catch_sleigh", 32, previews)
+    parked = Canvas(32, 64)
+    parked.blit(parked_sleigh(False), 0, 0)
+    parked.blit(parked_sleigh(True), 0, 32)
+    save_sprite(parked, "catch_parked", 32, previews)
 
 
 # ============================================================================ score popups
@@ -726,7 +769,7 @@ def main():
             oy += cv.frame_h + 2
         save_png(os.path.join(sys.argv[1], "catch_sprites.png"), overview, scale=4)
         save_png(os.path.join(sys.argv[1], "catch_bg.png"), previews[-1][1], scale=3)
-    print(f"Wrote Gift Catch art to {os.path.normpath(OUT)}")
+    print(f"Wrote Gift Tower art to {os.path.normpath(OUT)}")
 
 
 if __name__ == "__main__":

@@ -8,9 +8,10 @@ namespace sb
             { "Jingle Flap", "Reindeer Roost", flappy_run },
             { "Ping Pong Pals", "Rec Hall", pingpong_run },
             { "Sled Dash", "Big Hill", sled_run },
-            { "Gift Catch", "Toy Workshop", catch_run },
-            { "Ice Fishing", "Frozen Pond", fishing_run },
-            { "Pony Gallop", "Stable", horse_run },
+            { "Gift Tower", "Toy Workshop", catch_run, catch_best_text },
+            { "Ice Fishing", "Frozen Pond", fishing_run, fishing_best_text },
+            { "Pony Gallop", "Stable", horse_run, horse_best_text },
+            { "Snowball Fight", "Snow Fort", snowball_run, snowball_best_text },
         };
     }
 

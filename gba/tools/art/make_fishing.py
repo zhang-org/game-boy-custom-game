@@ -42,6 +42,8 @@ STOOL_X = 28          # left edge of the 16 px wide character sprite that sits o
 FLOOR_Y = 148         # top of the sandy lake bed (roughly)
 
 ROD_TIPS = [(29, 4), (9, 0), (29, 12)]   # rod tip pixel in each rod frame
+CHIMNEY_TOP = (185, 26)   # where the smoke puffs start (the cabin is drawn at x 158, base 55)
+BUCKET_TOP = (14, 55)     # middle of the bucket's rim (the caught fish pile up above it)
 
 
 def sprite_json(height):
@@ -233,12 +235,10 @@ def cabin(c, x, base):
         c.set(x0, yy, SNOW_S)
     c.hline(x - 4, x + w + 3, y - 1, ROOF)
     c.hline(x - 4, x + w + 3, y, OUTLINE)
-    # chimney + smoke
+    # chimney (the smoke is animated sprites: fishing_smoke, CHIMNEY_TOP)
     cx = x + w - 9
     c.rect(cx, y - 13, 5, 7, BRICK)
     c.rect(cx - 1, y - 15, 7, 2, SNOW)
-    for i, (dx, dy, r) in enumerate([(2, -19, 2), (4, -23, 3), (8, -28, 3), (13, -31, 2)]):
-        c.ellipse(cx + dx, y + dy, r + 0.5, r * 0.8 + 0.5, SMOKE)
 
 
 def snow_bank(c):
@@ -814,6 +814,88 @@ def make_fish(kind, phase):
     return c
 
 
+def make_pike(phase):
+    """The hungry pike: a long green fish with yellow spots and a duckbill snout full of teeth, 64x32
+    (the fish is in rows 8..23). Faces right like the others; phase 1 = tail wagged."""
+    c = Canvas(64, 32)
+    back, side, belly = rgb("#406820"), rgb("#68a030"), rgb("#f0f0b0")
+    x0, x1, h = 12, 56, 11
+    tail(c, x0 + 1, 16, 9, back, phase)
+    fish_body(c, x0, x1, h, back, side, belly, cy=16)
+    for x in range(x1 - 7, x1 + 4):          # long flat snout
+        c.set(x, 15, side)
+        c.set(x, 16, belly)
+    for x in range(x0 + 8, x1 - 8, 5):       # yellow spots
+        c.set(x, 14 + (x // 5) % 2, rgb("#c8d040"))
+        c.set(x + 1, 14 + (x // 5) % 2, rgb("#c8d040"))
+    for x in range(x0 + 18, x0 + 25):        # dorsal fin set far back
+        c.set(x, 10 - (1 if x < x0 + 22 else 0), back)
+    outline_all(c)
+    for x in range(x1 - 6, x1 + 3, 2):       # teeth
+        c.set(x, 17, WHITE)
+    eye(c, x1 - 9, 13)
+    return c
+
+
+def make_ice_chunk(variant):
+    """A slab of broken ice drifting just under the ice, 32x16."""
+    c = Canvas(32, 16)
+    w = 24 if variant == 0 else 18
+    x0 = (32 - w) // 2
+    for y in range(4, 12):
+        inset = 2 if y in (4, 11) else 1 if y in (5, 10) else 0
+        for x in range(x0 + inset + (y % 3 == 0), x0 + w - inset - (variant and y > 8)):
+            c.set(x, y, WHITE if y < 6 else rgb("#a8d8f8") if y < 10 else rgb("#68b0e8"))
+    c.set(x0 + 5, 7, WHITE)
+    c.set(x0 + 6, 8, WHITE)
+    outline_all(c)
+    return c
+
+
+def make_bucket_fill():
+    """The catch piling up in the bucket: 16x16 frames 0 (empty) .. 5 (heaped). The bucket rim is at
+    row 13; only the forked fish tails sticking out above it are drawn (the sprite sits on top of the
+    background bucket)."""
+    frames = []
+    # (x of the tail's left edge, top row, colour, colour of the fork), one more per frame
+    pieces = [(6, 7, rgb("#5878a8"), rgb("#88a8c8")), (10, 6, rgb("#c05070"), rgb("#f07890")),
+              (2, 8, rgb("#a8a868"), rgb("#708848")), (8, 4, rgb("#5878a8"), rgb("#a8c8e0")),
+              (12, 8, rgb("#c05070"), rgb("#e88890"))]
+    for n in range(6):
+        c = Canvas(16, 16)
+        for (x, top, body, fork) in pieces[:n]:
+            for y in range(top + 3, 14):           # the tail end of the body, 2 px wide
+                c.set(x, y, body)
+                c.set(x + 1, y, body)
+            for dx in (-1, 0, 1, 2):               # the forked tail fanning out at the top
+                c.set(x + dx, top + 2, fork)
+            for dx in (-2, -1, 2, 3):
+                c.set(x + dx, top + 1, fork)
+            c.set(x - 2, top, fork)
+            c.set(x + 3, top, fork)
+        outline_all(c)
+        for x in range(16):
+            for y in range(14, 16):
+                c.set(x, y, None)
+        frames.append(c)
+    return stack(frames)
+
+
+def make_smoke():
+    """A puff of chimney smoke, 16x16: 3 frames, growing and thinning as it rises."""
+    frames = []
+    for i, r in enumerate((3, 4.5, 5.5)):
+        c = Canvas(16, 16)
+        c.ellipse(8, 8, r, r * 0.8, WHITE if i < 2 else LINE)
+        if i == 2:
+            for y in range(16):
+                for x in range(16):
+                    if c.get(x, y) is not None and (x + y) % 3 == 0:
+                        c.set(x, y, None)
+        frames.append(c)
+    return stack(frames)
+
+
 FISH_KINDS = ["minnow", "perch", "trout", "salmon", "carp", "boot"]
 
 # ---- shared sprite palettes (15 colours max each)
@@ -895,6 +977,10 @@ def main():
     }
     for kind in FISH_KINDS:
         sprites["fishing_" + kind] = (stack([make_fish(kind, 0), make_fish(kind, 1)]), 16, FISH_PALETTE[kind])
+    sprites["fishing_pike"] = (stack([make_pike(0), make_pike(1)]), 32, PAL_FISH_B)
+    sprites["fishing_ice"] = (stack([make_ice_chunk(0), make_ice_chunk(1)]), 16, PAL_TACKLE)
+    sprites["fishing_bucket"] = (make_bucket_fill(), 16, PAL_FISH_A)
+    sprites["fishing_smoke"] = (make_smoke(), 16, PAL_TACKLE)
     for name, (canvas, fh, pal) in sprites.items():
         save_sprite(name, canvas, fh, pal)
     sprites = {k: (v[0], v[1]) for k, v in sprites.items()}

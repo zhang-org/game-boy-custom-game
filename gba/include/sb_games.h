@@ -11,9 +11,10 @@ namespace sb
         GAME_FLAPPY = 0,  // Jingle Flap: fly the reindeer between the chimneys
         GAME_PINGPONG,    // Ping Pong Pals: first to 7 vs. the CPU
         GAME_SLED,        // Sled Dash: dodge trees and rocks, grab presents
-        GAME_CATCH,       // Gift Catch: catch presents, avoid coal
+        GAME_CATCH,       // Gift Tower (was Gift Catch): stack presents, deliver them to the sleigh
         GAME_FISHING,     // Ice Fishing: cast, wait, reel
         GAME_HORSE,       // Pony Gallop: jump the fences
+        GAME_SNOWBALL,    // Snowball Fight: defend the snow fort against the family
         GAME_COUNT
     };
 
@@ -22,6 +23,10 @@ namespace sb
         const char* title;   // name of the game, e.g. "Sled Dash"
         const char* place;   // place on the map, e.g. "Big Hill"
         void (*run)();       // plays the game (intro, play, game over, retry) and returns to the map
+        // The game's best record as text for the map, intro and high score list (see best_record_text()
+        // in sb_save.h), or nullptr for the plain best score. Lets a game with its own kind of record
+        // (times, placings, one per difficulty) format it in its own file.
+        bn::string<40> (*best_text)(bool compact) = nullptr;
     };
 
     const game_info& game(int id);
@@ -33,6 +38,13 @@ namespace sb
     void catch_run();
     void fishing_run();
     void horse_run();
+    void snowball_run();
+
+    // Each game's best record as text (game_info::best_text), defined in the game's own file.
+    bn::string<40> catch_best_text(bool compact);
+    bn::string<40> fishing_best_text(bool compact);
+    bn::string<40> horse_best_text(bool compact);
+    bn::string<40> snowball_best_text(bool compact);
 
     // Ping Pong results (src/games/pingpong.cpp). A result is saved as one number that sorts correctly
     // (any win beats any loss, then the bigger margin); these turn it back into text like "5-2".
