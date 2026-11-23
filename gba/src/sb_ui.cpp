@@ -289,7 +289,7 @@ namespace sb
 
             int max_top() const
             {
-                return bn::max(0, int(lines.size()) - HOWTO_VISIBLE);
+                return bn::max(0, lines.size() - HOWTO_VISIBLE);
             }
 
             bool at_bottom() const

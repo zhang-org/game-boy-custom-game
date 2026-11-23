@@ -295,6 +295,9 @@ namespace sb
                 }
 
                 break;
+
+            default:
+                break;
             }
 
             snow.update();
