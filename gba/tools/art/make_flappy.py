@@ -5,6 +5,10 @@
 
 Sprites
   flappy_reindeer     32x32 x 4 frames: 0 glide, 1 legs down, 2 legs tucked, 3 crashed (eyes shut)
+  flappy_sleigh       32x16: the sleigh full of presents pulled behind the reindeer
+  flappy_present      8x8 x 3 frames: presents dropped down the chimneys
+  flappy_rein         8x8: one bead of the reins
+  (the reindeer, sleigh, presents and reins share one palette: REINDEER_PAL)
   flappy_chimney_top  32x16: snowy chimney crown (top of the bottom obstacle)
   flappy_chimney      32x64: brick chimney body (stacks vertically every 64 px)
   flappy_cloud_cap    32x32: bottom of a snow cloud with icicles (bottom of the top obstacle)
@@ -203,13 +207,84 @@ def reindeer_frame(c, oy, pose, crashed=False):
     c.blit(f, 0, oy)
 
 
+# The sleigh, presents and reins use the reindeer's colours, so all of them share one sprite palette.
+REINDEER_PAL = [R_OUT, R_BODY, R_DARK, R_LIGHT, R_CREAM, R_ANT, R_ANT_S, R_WHITE, R_RED, R_RED_S, R_GOLD, R_GOLD_S,
+                R_GREEN, R_GREEN_S, R_HOOF]
+
+
 def make_reindeer():
     c = Canvas(32, 128)
     reindeer_frame(c, 0, "glide")
     reindeer_frame(c, 32, "down")
     reindeer_frame(c, 64, "tuck")
     reindeer_frame(c, 96, "glide", crashed=True)
-    save(c, "flappy_reindeer", SPRITE_JSON.format(h=32))
+    save(c, "flappy_reindeer", SPRITE_JSON.format(h=32), palette=REINDEER_PAL)
+
+
+def present_box(c, x0, y0, w, h, box, box_s, ribbon):
+    """A wrapped present (top-left x0, y0) with a ribbon cross and a little bow on top."""
+    for y in range(y0, y0 + h):
+        for x in range(x0, x0 + w):
+            c.set(x, y, box_s if x >= x0 + w - 2 else box)
+    mid = x0 + w // 2
+    for y in range(y0, y0 + h):
+        c.set(mid, y, ribbon)
+    for x in range(x0, x0 + w):
+        c.set(x, y0 + h // 2, ribbon)
+    c.set(mid - 1, y0 - 1, ribbon)
+    c.set(mid + 1, y0 - 1, ribbon)
+
+
+def make_sleigh():
+    """flappy_sleigh 32x16: Santa's red sleigh, piled with presents, on golden runners (faces right)."""
+    c = Canvas(32, 16)
+    # Presents piled in the back (drawn first, the sleigh's side covers their bottoms).
+    present_box(c, 4, 2, 7, 7, R_GREEN, R_GREEN_S, R_GOLD)
+    present_box(c, 11, 4, 6, 5, R_WHITE, R_CREAM, R_RED)
+    present_box(c, 16, 1, 5, 7, R_GOLD, R_GOLD_S, R_RED)
+    # The body: a red tub, its back curling up a little and its front rising into a scroll.
+    for y in range(7, 13):
+        for x in range(3, 25):
+            c.set(x, y, R_RED_S if y >= 11 else R_RED)
+    for y in range(4, 13):                       # the front scroll
+        for x in range(23, 28):
+            if (x - 23) + (12 - y) * 0.6 <= 6.5:
+                c.set(x, y, R_RED_S if x >= 26 else R_RED)
+    for x in range(3, 26):                       # gold trim along the side
+        c.set(x, 9, R_GOLD)
+    c.set(26, 4, R_GOLD)
+    c.set(27, 5, R_GOLD)
+    # Runners: two posts and a long golden blade curling up at the front.
+    for x in (6, 20):
+        c.set(x, 13, R_GOLD_S)
+    for x in range(2, 28):
+        c.set(x, 14, R_GOLD)
+    c.set(28, 13, R_GOLD)
+    c.set(29, 12, R_GOLD)
+    c.set(29, 11, R_GOLD_S)
+    outline_all(c, R_OUT)
+    save(c, "flappy_sleigh", SPRITE_JSON.format(h=16), palette=REINDEER_PAL)
+
+
+def make_present():
+    """flappy_present 8x8 x 3 frames: the presents dropped down the chimneys."""
+    c = Canvas(8, 24)
+    for i, (box, box_s, ribbon) in enumerate(((R_GREEN, R_GREEN_S, R_GOLD), (R_RED, R_RED_S, R_GOLD),
+                                              (R_WHITE, R_CREAM, R_RED))):
+        f = Canvas(8, 8)
+        present_box(f, 1, 2, 6, 5, box, box_s, ribbon)
+        outline_all(f, R_OUT)
+        c.blit(f, 0, i * 8)
+    save(c, "flappy_present", SPRITE_JSON.format(h=8), palette=REINDEER_PAL)
+
+
+def make_rein():
+    """flappy_rein 8x8: one bead of the reins between the sleigh and the reindeer."""
+    c = Canvas(8, 8)
+    for x, y in ((3, 3), (4, 3), (3, 4), (4, 4)):
+        c.set(x, y, R_GOLD)
+    c.set(4, 4, R_GOLD_S)
+    save(c, "flappy_rein", SPRITE_JSON.format(h=8), palette=REINDEER_PAL)
 
 
 # ----------------------------------------------------------------------------- chimney
@@ -668,6 +743,9 @@ def main():
         os.makedirs(PREVIEW_DIR, exist_ok=True)
     os.makedirs(OUT, exist_ok=True)
     make_reindeer()
+    make_sleigh()
+    make_present()
+    make_rein()
     make_chimney()
     make_cloud()
     make_moon()
