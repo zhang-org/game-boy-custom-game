@@ -179,7 +179,7 @@ namespace
     constexpr int trophy_y = -40;
 
     constexpr int max_line_pieces = 16;
-    constexpr int max_zone_pieces = 8;
+    constexpr int max_zone_pieces = 9;              // 8 px each: the widest zone is the Old Boot on Easy, 60 + 10 px
     constexpr int bubble_count = 3;
 
     constexpr int bucket_x = -106;       // the catch piling up in the bucket (fishing_bucket), over the pail
