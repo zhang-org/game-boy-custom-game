@@ -629,28 +629,6 @@ def make_serve_zones():
     return c
 
 
-def make_whoosh():
-    """Air streaks around a PERFECT swing: 32x16, 2 frames (strong, fading)."""
-    white, pink = METER_PALETTE[5], METER_PALETTE[6]
-    c = Canvas(32, 32)
-    for f in range(2):
-        y0 = f * 16
-        col = white if f == 0 else pink
-        for k, (r, start, end) in enumerate(((13, 0.15, 0.85), (10, 0.25, 0.8), (7, 0.35, 0.75))):
-            if f == 1 and k == 0:
-                continue
-            import math
-            steps = 40
-            for i in range(steps):
-                t = start + (end - start) * i / steps
-                ang = math.pi * (1.0 + t)            # an arc over the top
-                x = int(round(16 + r * 1.2 * math.cos(ang)))
-                y = int(round(y0 + 14 + r * 0.9 * math.sin(ang)))
-                if (i + k) % 7 != 0:                  # little gaps make it look fast
-                    c.set(x, y, col)
-    return c
-
-
 def make_serve_marks():
     """8x8: the marker that climbs the bar."""
     white = METER_PALETTE[5]
@@ -706,7 +684,6 @@ def main():
     save_sprite("pingpong_vbar", make_serve_bar(), 32, METER_PALETTE)
     save_sprite("pingpong_vzone", make_serve_zones(), 32, METER_PALETTE)
     save_sprite("pingpong_vmark", make_serve_marks(), 8, METER_PALETTE)
-    save_sprite("pingpong_whoosh", make_whoosh(), 16, METER_PALETTE)
     print("hall: %d colours, %d unique tiles" % (len(hall.colors()), count_tiles(hall)))
     print("table: %d colours, %d unique tiles" % (len(table.colors()), count_tiles(table)))
 

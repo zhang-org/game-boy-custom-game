@@ -52,7 +52,6 @@
 #include "bn_sprite_items_pingpong_vbar.h"
 #include "bn_sprite_items_pingpong_vmark.h"
 #include "bn_sprite_items_pingpong_vzone.h"
-#include "bn_sprite_items_pingpong_whoosh.h"
 #include "bn_sprite_items_crowd_adam.h"
 #include "bn_sprite_items_crowd_aiden.h"
 #include "bn_sprite_items_crowd_alyssa.h"
@@ -236,6 +235,9 @@ namespace
     constexpr int PERFECT_SHAKE_FRAMES = 14;    // screen shake after it
     constexpr bn::fixed PERFECT_FLASH = 0.6;    // white flash strength (fades out)
     constexpr int TRAIL_LENGTH = 3;             // ghost balls behind a smash
+
+    // ---- SORT LAYERS: Butano can only handle 16 different (BG priority, z order) pairs among the sprites
+    // on screen at once ("No more sprite sort layers available"). Reuse the same few z values.
 
     // ---- Debug
     constexpr bool DEBUG_LOG = false;           // BN_LOG every point (for the test harness)
@@ -703,7 +705,6 @@ namespace
         bn::sprite_ptr serve_zone = bn::sprite_items::pingpong_vzone.create_sprite(0, 0, 0);
         bn::sprite_ptr serve_marker = bn::sprite_items::pingpong_vmark.create_sprite(0, 0, 0);
         sb::label my_score_label, cpu_score_label;
-        bn::sprite_ptr whoosh = bn::sprite_items::pingpong_whoosh.create_sprite(0, 0, 0);
         struct spectator
         {
             bn::sprite_ptr sprite;
@@ -761,7 +762,7 @@ namespace
         int incoming_power = 0;     // how hard your last shot was (the CPU recovers slower from hard ones)
 
         // ---- effects
-        int freeze = 0, shake = 0, burst_timer = 0, trail_timer = 0, whoosh_timer = 0;
+        int freeze = 0, shake = 0, burst_timer = 0, trail_timer = 0;
         bn::fixed flash = 0;
         bn::fixed history_x[TRAIL_LENGTH * 3] = {}, history_y[TRAIL_LENGTH * 3] = {};
 
@@ -784,9 +785,7 @@ namespace
             burst.set_bg_priority(1);
             burst.set_z_order(-5);
             burst.set_visible(false);
-            whoosh.set_bg_priority(1);
-            whoosh.set_z_order(-4);
-            whoosh.set_visible(false);
+
 
             serve_bar.set_bg_priority(1);
             serve_bar_top.set_bg_priority(1);
@@ -805,7 +804,7 @@ namespace
             {
                 bn::sprite_ptr g = bn::sprite_items::pingpong_ball.create_sprite(0, 0, 0);
                 g.set_bg_priority(1);
-                g.set_z_order(3);
+                g.set_z_order(1);
                 g.set_visible(false);
                 trail.push_back(g);
             }
@@ -873,7 +872,7 @@ namespace
                 bn::sprite_ptr sprite = crowd_sprite(c).create_sprite(at[0], at[1], CROWD_SIDE);
                 sprite.set_horizontal_flip(at[2] < 0);
                 sprite.set_bg_priority(2);
-                sprite.set_z_order(-at[1] / 8);
+                sprite.set_z_order(at[1] > 0 ? -1 : 0);   // front row in front (only 2 values: see SORT LAYERS)
                 crowd.push_back({ sprite, spot });
                 ++spot;
             }
@@ -1069,9 +1068,9 @@ namespace
         // Automatic swing (taps and no button).
         void player_hit()
         {
-            int button = chosen_button();
+            // (Tapping A/B for a drive or a lob was removed: A and B are only for smashes.)
             int aim = aim_input();
-            shot_kind kind = button == 1 ? SHOT_DRIVE : button == 2 ? SHOT_LOB : SHOT_PLAIN;
+            shot_kind kind = SHOT_PLAIN;
             int speedup = bn::min(rally_hits / RALLY_HITS_PER_SPEEDUP, RALLY_SPEEDUP_MAX);
             bn::fixed tx = default_aim_x();
             bn::fixed tz;
@@ -1178,7 +1177,7 @@ namespace
                 shake = PERFECT_SHAKE_FRAMES;
                 flash = PERFECT_FLASH;
                 start_burst(hit_x, hit_y);
-                start_whoosh(hit_x, hit_y - 4);
+                start_whoosh();
                 sb::sfx(bn::sound_items::sfx_pp_perfect);
                 show_message(high ? "PERFECT SMASH!" : "PERFECT SHOT!", sb::text_color::YELLOW, 50);
             }
@@ -1206,11 +1205,9 @@ namespace
             burst.set_position(x.round_integer(), y.round_integer());
         }
 
-        // Air streaks over a PERFECT swing, with a whoosh sound.
-        void start_whoosh(bn::fixed x, bn::fixed y)
+        // The whoosh sound of a PERFECT swing.
+        void start_whoosh()
         {
-            whoosh_timer = 16;
-            whoosh.set_position(x.round_integer(), y.round_integer());
             sb::sfx(bn::sound_items::sfx_whoosh);
         }
 
@@ -1243,7 +1240,7 @@ namespace
                 flash = PERFECT_FLASH / 2;
                 start_trail(hit_x, hit_y, 30);
                 start_burst(hit_x, hit_y);
-                start_whoosh(me->x + 8, me->center_y() - 6);
+                start_whoosh();
                 sb::sfx(bn::sound_items::sfx_pp_perfect);
                 show_message(fast ? "Perfect serve!" : "Perfect spin!", sb::text_color::YELLOW, 40);
             }
@@ -2284,13 +2281,6 @@ namespace
         void update_effects()
         {
             animate_crowd();
-            whoosh.set_visible(whoosh_timer > 0);
-
-            if(whoosh_timer > 0)
-            {
-                whoosh.set_tiles(bn::sprite_items::pingpong_whoosh.tiles_item(), whoosh_timer > 8 ? 0 : 1);
-                --whoosh_timer;
-            }
 
             int dx = 0, dy = 0;
 
@@ -2333,7 +2323,6 @@ namespace
             freeze = 0;
             burst_timer = 0;
             trail_timer = 0;
-            whoosh_timer = 0;
             set_white_flash(0);
             update_effects();
         }
@@ -2416,7 +2405,6 @@ namespace
                     // Hit-stop: everything holds still for a moment on a PERFECT shot.
                     --freeze;
                     burst.set_visible(true);
-                    whoosh.set_visible(whoosh_timer > 0);
                     continue;
                 }
 
@@ -2598,9 +2586,8 @@ void sb::pingpong_run()
                     "",
                     "#Rally",
                     "Move < > to return the",
-                    "ball. You swing by",
-                    "yourself. Tap A to drive,",
-                    "tap B for a soft lob.",
+                    "ball: you swing by",
+                    "yourself.",
                     "",
                     "#Smash",
                     "Ready to attack? Hold A or",
