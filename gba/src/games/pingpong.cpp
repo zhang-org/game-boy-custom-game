@@ -138,13 +138,14 @@ namespace
     constexpr int CHARGE_POWER = 20;
     constexpr int PERFECT_POWER = 26;           // extra difficulty for the CPU on a PERFECT shot
 
-    // ---- Serves: HOLD A (fast serve) or B (spin serve). A marker climbs a bar next to you; LET GO on the
-    // white line for a perfect serve (green = strong, gold = ok, the rest = weak). The target sits somewhere
+    // ---- Serves: HOLD A (fast serve) or B (spin serve). A marker climbs a bar next to you; LET GO in the
+    // red box for a perfect serve (green = strong, gold = ok, the rest = weak). The target sits somewhere
     // new every serve. If the marker reaches the top, the serve is cancelled: press again.
     // Speed and zone sizes: see LEVELS.
     constexpr bn::fixed TOSS_SPEED = 1.3;       // how fast the ball goes up when tossed (after you let go)
     constexpr int SERVE_TRACK = 58;             // the marker climbs this many pixels
-    constexpr int SERVE_TARGET_MIN = 26;        // the perfect line is somewhere between here ...
+    constexpr int SERVE_TOSS_HEIGHT = 30;       // the ball goes this high while the marker climbs, and falls back at the top
+    constexpr int SERVE_TARGET_MIN = 26;        // the perfect box is somewhere between here ...
     constexpr int SERVE_TARGET_MAX = 50;        // ... and here (pixels up the bar)
     constexpr int SERVE_OWN_BOUNCE_Z = 20;      // the serve first bounces this far from the net on the server's side
     constexpr int SERVE_FIRST_FRAMES = 12;      // flight time from the paddle to that first bounce
@@ -184,13 +185,15 @@ namespace
         int serve_ok;               // ... this many = ok (gold); further = weak. (Art: SERVE_ZONES in make_pingpong.py)
         int perfect_serve_floater;  // % chance that a PERFECT serve comes back as a slow floater
         int good_serve_floater;     // ... and a strong serve
+        int perfect_return;         // % chance it still blocks back one of your PERFECT smashes ...
+        int perfect_return_close;   // ... extra % when the smash goes close to where it already stands
     };
 
     constexpr cpu_level LEVELS[3] = {
-        //  name      speed react attack weak range miss tell normal attack serve spin% | charge front back  bar   perf str ok | float strong
-        { "Easy",   0.95, 12,   14,    50,  26,   82,  30,  58,    46,    58,   0,    30,    10,   3,    0.6,  2,   6,  10,  100, 40 },
-        { "Medium", 1.1,  10,   20,    62,  26,   92,  22,  52,    40,    52,   20,   24,    8,    2,    0.8,  1,   5,  9,   100, 30 },
-        { "Hard",   1.3,  8,    28,    72,  24,   102, 16,  46,    34,    44,   45,   24,    6,    1,    1.05, 1,   3,  7,   85,  20 },
+        //  name      speed react attack weak range miss tell normal attack serve spin% | charge front back  bar   perf str ok | float strong | ret close
+        { "Easy",   0.95, 12,   14,    50,  26,   82,  30,  58,    46,    58,   0,    30,    10,   3,    0.6,  3,   7,  11,  100, 40,    5,  20 },
+        { "Medium", 1.1,  10,   20,    62,  26,   92,  22,  52,    40,    52,   20,   24,    6,    1,    0.8,  2,   6,  10,  100, 30,    30, 45 },
+        { "Hard",   1.3,  8,    28,    72,  24,   102, 16,  46,    34,    44,   45,   24,    6,    1,    1.05, 2,   4,  8,   85,  20,    45, 40 },
     };
 
     constexpr int CPU_RUN_WEIGHT = 60;          // difficulty = power + run * this, run = 1 when it only just makes it
@@ -413,6 +416,7 @@ namespace
                                 // -1 backhand (ball goes to its left)
         bn::fixed swing_x, swing_y; // screen spot the swing aims at
         bool cheering = false;
+        bool serve_stance = false;  // sideways and bent over, getting ready to serve
         bool facing_up;
 
         actor(int chr, bool up, bn::fixed start_x, bn::fixed start_z) :
@@ -458,8 +462,6 @@ namespace
                 lift = smash_t < 6 ? smash_t : bn::max(0, 12 - smash_t);
             }
 
-            sprite.set_position(x.round_integer(), cy - lift);
-
             int frame;
             bool flip = false;
 
@@ -470,6 +472,11 @@ namespace
             else if(smash > 0 && smash_t < 5)
             {
                 frame = sb::FRAME_CHEER;                // arms up, ready to slam
+            }
+            else if(serve_stance)
+            {
+                frame = sb::FRAME_SIDE;                 // side-on to the table, like a real serve
+                lift = -2;                              // bent over a little
             }
             else if(charge_side != 0 || windup != 0)
             {
@@ -493,6 +500,7 @@ namespace
                 }
             }
 
+            sprite.set_position(x.round_integer(), cy - lift);
             sprite.set_tiles(sb::character_sprite(character).tiles_item(), frame);
             sprite.set_horizontal_flip(flip);
 
@@ -557,6 +565,14 @@ namespace
                     px = (px + tx) / 2;
                     py = (py + swing_y) / 2 + 2;
                 }
+            }
+            else if(serve_stance)
+            {
+                // Paddle low and back behind the body.
+                pframe = 2;
+                pside = -1;
+                px = x - 9;
+                py = cy + 6;
             }
             else if(charge_side != 0)
             {
@@ -650,6 +666,7 @@ namespace
         bool charging = false;
         int charge_button = 0;      // 1 = A (forehand), 2 = B (backhand)
         int charge = 0;
+        bool last_perfect = false;  // your last hit was a PERFECT smash / shot
 
         // ---- effects
         int freeze = 0, shake = 0, burst_timer = 0, trail_timer = 0;
@@ -969,6 +986,7 @@ namespace
             me->start_swing(ball.x, ball_screen_y());
             ball.spin = 0;
             plan_shot(ball, tx, tz, frames);
+            last_perfect = false;
             after_hit(PLAYER, kind, power);
             sb::sfx(bn::sound_items::sfx_paddle);
         }
@@ -982,6 +1000,19 @@ namespace
             bn::fixed left = charge_button == 2 ? PLAYER_REACH_X + CHARGE_REACH_STRONG : PLAYER_REACH_X - CHARGE_REACH_WEAK;
             return ball.h >= HIT_MIN_H && dz >= -(PLAYER_REACH_FRONT + CHARGE_REACH_FRONT) && dz <= PLAYER_REACH_BACK &&
                    dx <= right && dx >= -left;
+        }
+
+        // Held the smash too long: a slow, soft block (the CPU will probably attack it).
+        void weak_block()
+        {
+            me->start_swing(ball.x, ball_screen_y());
+            stop_charging();
+            ball.spin = 0;
+            plan_shot(ball, default_aim_x(), LOB_DEPTH, LOB_FRAMES + 6);
+            last_perfect = false;
+            after_hit(PLAYER, SHOT_LOB, 0);
+            sb::sfx(bn::sound_items::sfx_paddle);
+            show_message("Too late! Weak return", sb::text_color::WHITE, 40);
         }
 
         // You let go of A/B after charging.
@@ -1021,6 +1052,7 @@ namespace
             ball.spin = 0;
             plan_shot(ball, tx, SMASH_DEPTH, frames);
             stop_charging();
+            last_perfect = perfect;
             after_hit(PLAYER, high ? SHOT_SMASH : SHOT_POWER, power);
             trail_timer = 40;
 
@@ -1172,7 +1204,7 @@ namespace
 
             if(kind == SHOT_CPU_WEAK)
             {
-                show_message("A floater! Smash it!", sb::text_color::WHITE, 30);
+                show_message(last_perfect ? "Blocked! Smash again!" : "A floater! Smash it!", sb::text_color::WHITE, 30);
             }
 
             after_hit(CPU, kind, 0);
@@ -1335,6 +1367,18 @@ namespace
             else if(difficulty >= level->miss_from - 12 && (kind == SHOT_SERVE_FAST || kind == SHOT_SERVE_SPIN))
             {
                 plan = PLAN_WEAK;   // a serve close to an ace: it just gets it back
+            }
+
+            // A PERFECT smash usually wins the point, but it can be blocked back, especially when it goes
+            // right at the CPU (it hardly has to move).
+            if(last_perfect && plan == PLAN_ERROR && (home_frame >= 0 || any_frame >= 0))
+            {
+                int chance = level->perfect_return + (dist < 18 ? level->perfect_return_close : 0);
+
+                if(sb::rand_range(0, 99) < chance)
+                {
+                    plan = PLAN_WEAK;
+                }
             }
             else if(difficulty < level->attack_below || (kind == SHOT_LOB && at.h >= SMASH_MIN_HEIGHT))
             {
@@ -1548,7 +1592,16 @@ namespace
             {
                 if(charging)
                 {
-                    return;     // you hit by letting go of the button
+                    // You hit by letting go of the button. Held too long, and the ball is about to pass you:
+                    // you just block it back, weakly.
+                    bn::fixed cdx, cdz;
+
+                    if(charged_reach(cdx, cdz) && cdz >= PLAYER_REACH_BACK - 2)
+                    {
+                        weak_block();
+                    }
+
+                    return;
                 }
 
                 bn::fixed dx = ball.x - me->x;
@@ -1590,6 +1643,12 @@ namespace
         void hide_serve_bar()
         {
             serve_aiming = false;
+
+            if(me)
+            {
+                me->serve_stance = false;
+            }
+
             serve_bar.set_visible(false);
             serve_bar_top.set_visible(false);
             serve_zone.set_visible(false);
@@ -1623,7 +1682,8 @@ namespace
                 toss_kind = a ? SHOT_SERVE_FAST : SHOT_SERVE_SPIN;
                 serve_mark = 0;
                 serve_zone_pos = sb::rand_range(SERVE_TARGET_MIN, SERVE_TARGET_MAX);
-                hint_label.set(-116, 70, "Let go on the white line!", sb::text_color::WHITE);
+                me->serve_stance = true;
+                hint_label.set(-116, 70, "Let go in the red box!", sb::text_color::WHITE);
             }
 
             // The marker only climbs. At the top the serve is cancelled.
@@ -1652,6 +1712,14 @@ namespace
             serve_zone.set_visible(true);
             serve_marker.set_visible(true);
 
+            // The ball is tossed up while the marker climbs and comes back down as it reaches the top.
+            bn::fixed f = serve_mark / SERVE_TRACK;
+            ball.x = me->x + 6;
+            ball.z = me->z - 3;
+            ball.h = 2 + SERVE_TOSS_HEIGHT * 4 * f * (1 - f);
+            ball.vh = 0;
+            me->serve_stance = true;
+
             bool held = serve_button == 1 ? bn::keypad::a_held() : bn::keypad::b_held();
 
             if(! held)
@@ -1663,10 +1731,7 @@ namespace
                                         miss <= level->serve_ok ? SERVE_OK : SERVE_WEAK;
                 hide_serve_bar();
                 hint_label.clear();
-                ball.vh = TOSS_SPEED;
-                st = state::TOSS;
-                timer = 0;
-                sb::sfx(bn::sound_items::sfx_jump);
+                player_serve(serve_quality_of_last);    // hit the ball right where it is in the toss
             }
         }
 
@@ -2315,16 +2380,19 @@ void sb::pingpong_run()
             if(first)
             {
                 const bn::string_view howto[] = {
-                    "Auto-swing. Tap A: drive,",
-                    "tap B: lob. < > to aim.",
-                    "HOLD A/B, let go: SMASH!",
-                    "Serve: hold A/B, let go",
+                    "Serve: hold A (fast) or B",
+                    "(spin); let go on red box.",
+                    "Rally: move < > to the ball,",
+                    "you swing by yourself.",
                 };
 
                 if(! game_intro(GAME_PINGPONG, howto))
                 {
                     break;
                 }
+
+                message("Smash: hold A or B (you move", "slower), let go at the ball.",
+                        "A: forehand <   B: backhand >");
 
                 first = false;
             }

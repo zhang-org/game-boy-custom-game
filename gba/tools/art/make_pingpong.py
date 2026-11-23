@@ -603,26 +603,29 @@ def make_serve_bar():
     return c
 
 
-# Serve zones per difficulty (pixels from the perfect line): perfect, strong, ok. Keep in sync with
-# serve_perfect / serve_strong / serve_ok in LEVELS (pingpong.cpp).
-SERVE_ZONES = [(2, 6, 10), (1, 5, 9), (1, 3, 7)]
+# Serve zones per difficulty (pixels from the middle of the target): perfect, strong, ok. Keep in sync
+# with serve_perfect / serve_strong / serve_ok in LEVELS (pingpong.cpp).
+SERVE_ZONES = [(3, 7, 11), (2, 6, 10), (2, 4, 8)]
 
 
 def make_serve_zones():
-    """8x32 frames (Easy, Medium, Hard): the coloured target around the perfect line in the middle (row 16):
-    white line = perfect, green = strong, gold = ok, red = weak."""
+    """8x32 frames (Easy, Medium, Hard): the target on the serve bar, centred on row 16:
+    red box = perfect, green = strong, gold = ok (anything else is weak)."""
     out_, back, green, gold, red, white = METER_PALETTE[:6]
     c = Canvas(8, 96)
     for f, (perfect, strong, ok) in enumerate(SERVE_ZONES):
         y0 = f * 32
         for d in range(0, 16):
-            col = white if d < perfect else green if d <= strong else gold if d <= ok else red if d <= ok + 3 else None
+            col = red if d <= perfect else green if d <= strong else gold if d <= ok else None
             if col is None:
                 continue
-            for y in (y0 + 16 - d, y0 + 15 + d):
+            for y in (y0 + 16 - d, y0 + 16 + d):
                 if 0 <= y - y0 < 32:
                     c.rect(2, y, 4, 1, col)
-        c.rect(0, y0 + 15, 8, 2, white)                 # the perfect line sticks out of the bar
+        # the red box sticks out of the bar a little, with white corners, so it's easy to see
+        c.rect(1, y0 + 16 - perfect, 6, 2 * perfect + 1, red)
+        for y in (y0 + 16 - perfect - 1, y0 + 16 + perfect + 1):
+            c.rect(1, y, 6, 1, white)
     return c
 
 
