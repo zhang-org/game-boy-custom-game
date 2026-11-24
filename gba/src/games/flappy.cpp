@@ -1,6 +1,6 @@
 // Jingle Flap: ride a flying reindeer between snowy chimneys and icicle clouds over the rooftops, on a
 // world tour: St. Louis first, then Gainesville, Seattle, the Bay Area and Moorestown in a random order
-// (a new city every 10 gaps).
+// (a new city every 10 gaps). The reindeer pulls a sleigh full of presents, and drops one down every chimney.
 //
 // Controls: A (or Up) flaps. Start pauses. +1 point for every gap you fly through (+2 per candy cane,
 // switched off for now: CANDY_CHANCE).
@@ -39,7 +39,10 @@
 #include "bn_sprite_items_flappy_cloud.h"
 #include "bn_sprite_items_flappy_cloud_cap.h"
 #include "bn_sprite_items_flappy_moon.h"
+#include "bn_sprite_items_flappy_present.h"
 #include "bn_sprite_items_flappy_reindeer.h"
+#include "bn_sprite_items_flappy_rein.h"
+#include "bn_sprite_items_flappy_sleigh.h"
 
 #include "sb_audio.h"
 #include "sb_characters.h"
@@ -55,7 +58,8 @@ namespace
 
     // Flying: a little floaty, but not sluggish
     constexpr bn::fixed GRAVITY = 0.14;            // pixels/frame^2 pulling down: higher = falls faster
-    constexpr bn::fixed FLAP_SPEED = -2.7;         // vertical speed right after a flap (negative = up): more negative = bigger hop
+    constexpr bn::fixed FLAP_SPEED = -2.4;         // vertical speed right after a flap (negative = up): more negative = bigger hop
+                                                   // (-2.4 = a hop of about 21 px; it was -2.7 = 26 px, too much to steer)
     constexpr bn::fixed MAX_FALL_SPEED = 3.3;      // pixels/frame: the fastest the reindeer can drop
     constexpr int PLAYER_X = -56;                  // screen x of the reindeer (fixed; the world scrolls past)
     constexpr int CEILING_Y = -70;                 // reindeer can't fly higher than this (no penalty, it just stops)
@@ -105,6 +109,17 @@ namespace
     constexpr bn::fixed TOWN_PARALLAX = 0.35;      // far houses
     constexpr bn::fixed SNOW_PARALLAX = 0.5;       // falling snow drifts left with the wind
 
+    // The sleigh pulled behind the reindeer, and the presents it drops down the chimneys (just for show:
+    // only the reindeer can crash).
+    constexpr int SLEIGH_X = PLAYER_X - 29;        // screen x of the sleigh's centre
+    constexpr int SLEIGH_DY = 3;                   // it hangs a little lower than the reindeer ...
+    constexpr int SLEIGH_LAG = 7;                  // ... and follows its height this many frames later
+    constexpr bn::fixed SLEIGH_SCALE = 0.8;        // same size as the reindeer
+    constexpr int REIN_BEADS = 3;                  // beads drawn along the reins
+    constexpr bn::fixed PRESENT_TOSS = -0.9;       // a present is tossed up a little ...
+    constexpr bn::fixed PRESENT_GRAVITY = 0.2;     // ... then falls into the chimney
+    constexpr int PRESENT_INSIDE = 3;              // px below the chimney's top where it disappears inside
+
     // Look and feel
     constexpr int RIDER_DX = -5;                   // rider position relative to the reindeer sprite centre
     constexpr int RIDER_DY = -11;
@@ -128,6 +143,7 @@ namespace
         int gap_top = 0;     // screen y of the bottom edge of the top cloud
         int gap_bottom = 0;  // screen y of the top of the chimney
         bool scored = false;
+        bool present_dropped = false;
         bn::vector<bn::sprite_ptr, 6> sprites;
         bn::optional<bn::sprite_ptr> candy;
         int candy_y = 0;
@@ -139,6 +155,7 @@ namespace
         c.gap_top = gap_centre - gap / 2;
         c.gap_bottom = c.gap_top + gap;
         c.scored = false;
+        c.present_dropped = false;
         c.sprites.clear();
         c.candy.reset();
 
@@ -393,7 +410,10 @@ void sb::flappy_run()
         "Fly through the gaps",
         "between the chimneys and",
         "the icy clouds: 1 point",
-        "for every gap.",
+        "for every gap. Your",
+        "sleigh drops a present",
+        "down every chimney you",
+        "fly past.",
         "",
         "#World tour",
         "Start in St. Louis. Every",
@@ -429,12 +449,114 @@ void sb::flappy_run()
     reindeer.set_affine_mat(tilt);
     rider.set_affine_mat(tilt);
 
+    // The sleigh and reins: behind the chimneys and clouds (z 1), so it looks like it flies past them.
+    bn::sprite_ptr sleigh = bn::sprite_items::flappy_sleigh.create_sprite(SLEIGH_X, -8 + SLEIGH_DY);
+    sleigh.set_bg_priority(2);
+    sleigh.set_z_order(1);
+    bn::sprite_affine_mat_ptr sleigh_scale = bn::sprite_affine_mat_ptr::create();
+    sleigh_scale.set_scale(SLEIGH_SCALE);
+    sleigh.set_affine_mat(sleigh_scale);
+    bn::vector<bn::sprite_ptr, REIN_BEADS> reins;
+
+    for(int i = 0; i < REIN_BEADS; ++i)
+    {
+        bn::sprite_ptr bead = bn::sprite_items::flappy_rein.create_sprite(SLEIGH_X, -8);
+        bead.set_bg_priority(2);
+        bead.set_z_order(1);
+        reins.push_back(bead);
+    }
+
+    // The reindeer's recent heights: the sleigh follows them SLEIGH_LAG frames later.
+    constexpr int HISTORY = SLEIGH_LAG + 1;
+    bn::fixed history[HISTORY];
+    int history_pos = 0;
+
+    for(bn::fixed& h : history)
+    {
+        h = -8;
+    }
+
+    // Presents falling from the sleigh into a chimney (`col` = which column, they move with it).
+    struct present
+    {
+        bn::sprite_ptr sprite;
+        int col;
+        bn::fixed y, vy;
+    };
+
+    bn::vector<present, COLUMN_COUNT> presents;
+    int present_count = 0;   // picks the next present's colours
+
     snowfall snow(SNOWFLAKES, 2);
     bn::vector<column, COLUMN_COUNT> columns;
     label score_label, notice_label, hint_label;
 
     bn::fixed sky_x = 0, town_x = 0, roofs_x = 0;
+    bn::fixed sleigh_y = 0;
     round_state state;
+
+    // The sleigh hangs from the reindeer's height a few frames ago; the reins bead along between them.
+    auto place_sleigh = [&](bn::fixed reindeer_y) {
+        history_pos = (history_pos + 1) % HISTORY;
+        history[history_pos] = reindeer_y;
+        sleigh_y = history[(history_pos + 1) % HISTORY] + SLEIGH_DY;
+        sleigh.set_position(SLEIGH_X, sleigh_y);
+
+        // From the sleigh's front (x + 10) to the reindeer's chest strap (x - 6), sagging a little in the middle.
+        bn::fixed x0 = SLEIGH_X + 10, y0 = sleigh_y - 2;
+        bn::fixed x1 = PLAYER_X - 6, y1 = reindeer_y + 1;
+
+        for(int i = 0; i < REIN_BEADS; ++i)
+        {
+            bn::fixed t = bn::fixed(i + 1) / (REIN_BEADS + 1);
+            bn::fixed sag = (i == REIN_BEADS / 2) ? 2 : 1;
+            reins[i].set_position(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t + sag);
+        }
+    };
+
+    // Drops a present when the sleigh passes over a chimney, and lets the falling ones land inside.
+    auto update_presents = [&]() {
+        for(int i = 0; i < columns.size(); ++i)
+        {
+            column& c = columns[i];
+
+            if(! c.present_dropped && c.x <= SLEIGH_X && ! presents.full())
+            {
+                c.present_dropped = true;
+                bn::sprite_ptr sprite = bn::sprite_items::flappy_present.create_sprite(
+                            c.x, sleigh_y - 2, present_count % 3);
+                sprite.set_bg_priority(2);
+                sprite.set_z_order(1);  // behind the chimney's snowy top: it vanishes inside
+                presents.push_back({ sprite, i, sleigh_y - 2, PRESENT_TOSS });
+                ++present_count;
+            }
+        }
+
+        for(int i = 0; i < presents.size(); )
+        {
+            present& p = presents[i];
+            const column& c = columns[p.col];
+            p.vy += PRESENT_GRAVITY;
+            p.y += p.vy;
+
+            // (A column that left the screen is reused on the right: then the present is just dropped.)
+            bool gone = c.x < -130 || c.x > SLEIGH_X + 4;
+
+            if(p.y >= c.gap_bottom + PRESENT_INSIDE || gone)
+            {
+                if(! gone)
+                {
+                    sfx(bn::sound_items::sfx_point);   // down the chimney!
+                }
+
+                presents.erase(presents.begin() + i);
+                continue;
+            }
+
+            p.sprite.set_position(c.x, p.y);
+            ++i;
+        }
+    };
 
     // Draws the reindeer and rider at height y with a nose tilt in degrees (positive = nose up).
     auto place_player = [&](bn::fixed y, bn::fixed angle) {
@@ -446,6 +568,7 @@ void sb::flappy_run()
         bn::fixed ox = (c * RIDER_DX + s * RIDER_DY) * PLAYER_SCALE;
         bn::fixed oy = (c * RIDER_DY - s * RIDER_DX) * PLAYER_SCALE;
         rider.set_position(PLAYER_X + ox, y + oy);
+        place_sleigh(y);
     };
 
     auto set_reindeer_frame = [&](int frame) {
@@ -500,6 +623,13 @@ void sb::flappy_run()
         town.set_blending_enabled(false);
         town_x = CITY_START_X;
         town.set_x(town_x);
+
+        presents.clear();
+
+        for(bn::fixed& h : history)
+        {
+            h = state.y;
+        }
 
         set_reindeer_frame(REINDEER_GLIDE);
         place_player(state.y, 0);
@@ -617,6 +747,7 @@ void sb::flappy_run()
                 place_column(c);
             }
 
+            update_presents();
             scroll_world(state.scroll);
 
             // Score and collisions.
@@ -642,8 +773,7 @@ void sb::flappy_run()
                     c.scored = true;
                     ++state.score;
                     ++state.gaps;
-                    sfx(bn::sound_items::sfx_point);
-                    show_score();
+                    show_score();   // (the "point" sound plays when the sleigh's present lands in the chimney)
 
                     if(state.gaps % SPEEDUP_EVERY == 0)
                     {
