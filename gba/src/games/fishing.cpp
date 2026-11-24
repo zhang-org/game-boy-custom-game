@@ -29,7 +29,6 @@
 #include "bn_sprite_items_fishing_bang.h"
 #include "bn_sprite_items_fishing_bar.h"
 #include "bn_sprite_items_fishing_bobber.h"
-#include "bn_sprite_items_fishing_boot.h"
 #include "bn_sprite_items_fishing_bubble.h"
 #include "bn_sprite_items_fishing_bucket.h"
 #include "bn_sprite_items_fishing_carp.h"
@@ -122,7 +121,7 @@ namespace
         bn::fixed marker_speed;  // px/frame of the reel marker
     };
 
-    enum fish_kind { MINNOW, PERCH, TROUT, SALMON, CARP, BOOT, KIND_COUNT };
+    enum fish_kind { MINNOW, PERCH, TROUT, SALMON, CARP, KIND_COUNT };
 
     // Points and reel difficulty per fish (bigger = more points, smaller zone, faster marker).
     const fish_type fish_types[KIND_COUNT] = {
@@ -131,7 +130,6 @@ namespace
         { "Frost Trout",  35,  &bn::sprite_items::fishing_trout,  13, bn::fixed(3) / 5,  3, 40, bn::fixed(3) / 2 },
         { "Berry Salmon", 50,  &bn::sprite_items::fishing_salmon, 14, bn::fixed(7) / 10, 3, 36, bn::fixed(13) / 8 },
         { "Golden Carp",  100, &bn::sprite_items::fishing_carp,   13, bn::fixed(1) / 3,  3, 30, bn::fixed(15) / 8 },
-        { "Old Boot",     1,   &bn::sprite_items::fishing_boot,   10, bn::fixed(1) / 8,  1, 60, 1 },
     };
 
     // Depth lanes (fish centre y, Butano coordinates), shallow to deep.
@@ -141,13 +139,14 @@ namespace
     // Which lane each fish slot swims in (so every depth always has fish).
     constexpr int slot_lane[fish_slots] = { 0, 0, 1, 1, 2, 2, 3, 4 };
 
-    // Chance (weights) of each kind turning up in each lane: minnow, perch, trout, salmon, carp, boot.
+    // Chance (weights) of each kind turning up in each lane: minnow, perch, trout, salmon, carp.
+    // (No old boot: a boot that swims up and bites like a fish looked silly.)
     constexpr int lane_weights[lane_count][KIND_COUNT] = {
-        { 80, 20,  0,  0,  0,  0 },
-        { 30, 60, 10,  0,  0,  0 },
-        {  0, 30, 60, 10,  0,  0 },
-        {  0,  0, 30, 55,  7,  8 },
-        {  0,  0,  0, 45, 25, 30 },
+        { 80, 20,  0,  0,  0 },
+        { 30, 60, 10,  0,  0 },
+        {  0, 30, 60, 10,  0 },
+        {  0,  0, 30, 60, 10 },
+        {  0,  0,  0, 70, 30 },
     };
 
     // =========================================================================== layout
@@ -179,7 +178,7 @@ namespace
     constexpr int trophy_y = -40;
 
     constexpr int max_line_pieces = 16;
-    constexpr int max_zone_pieces = 9;              // 8 px each: the widest zone is the Old Boot on Easy, 60 + 10 px
+    constexpr int max_zone_pieces = 9;              // 8 px each: the widest zone is the Snow Minnow on Easy, 50 + 10 px
     constexpr int bubble_count = 3;
 
     constexpr int bucket_x = -106;       // the catch piling up in the bucket (fishing_bucket), over the pail
