@@ -176,11 +176,14 @@ namespace
     constexpr int SERVE_FIRST_FRAMES = 12;      // flight time from the paddle to that first bounce
     constexpr int SERVE_AIM_X = 30;
     // Fast serve (A): flight frames after the first bounce, and CPU power. [weak, ok, strong, perfect]
-    constexpr int SERVE_FAST_FRAMES[4] = { 46, 40, 34, 16 };
+    constexpr int SERVE_FAST_FRAMES[4] = { 46, 40, 34, 18 };
     // A plain ball starting low off your side must arc up to clear the net, so plan_shot stretches any fast
-    // serve to about 34 frames. A PERFECT topspin serve instead dips hard (extra pull down while it flies),
-    // so it can be fast and still clear the net: about 2.9 px/frame, a bit faster than the fastest smash.
-    constexpr bn::fixed SERVE_TOPSPIN_DIP = 0.3;
+    // serve to about 34 frames. A PERFECT topspin serve instead dips (extra pull down while it flies), so it
+    // can be fast and still clear the net. Its first hop onto your side is quick too (SERVE_PERFECT_HOP_FRAMES,
+    // not held back by SHOT_MIN_FRAMES), so it keeps one steady speed, about 2.3-2.4 px/frame the whole way:
+    // a little under a PERFECT smash (2.7) and about twice a strong serve.
+    constexpr bn::fixed SERVE_TOPSPIN_DIP = 0.2;
+    constexpr int SERVE_PERFECT_HOP_FRAMES = 10;
     constexpr int SERVE_FAST_POWER[4] = { 10, 20, 32, 46 };
     constexpr int SERVE_FAST_DEPTH = -26;
     // Spin serve (B): slower, but curves and kicks sideways after it bounces. [weak, ok, strong, perfect]
@@ -454,9 +457,9 @@ namespace
 
     // Aims the ball at (tx, tz) on the table, landing after `frames` frames (allowing for b.spin).
     // Lengthens the flight (a higher, slower arc) until the ball clears the net.
-    void plan_shot(ball_state& b, bn::fixed tx, bn::fixed tz, int frames)
+    void plan_shot(ball_state& b, bn::fixed tx, bn::fixed tz, int frames, int min_frames = SHOT_MIN_FRAMES)
     {
-        frames = bn::max(frames, SHOT_MIN_FRAMES);
+        frames = bn::max(frames, min_frames);
         bn::fixed gravity = GRAVITY + b.dip;
 
         for(int attempt = 0; attempt < 30; ++attempt, frames += 2)
@@ -1646,7 +1649,15 @@ namespace
 
             // First the ball goes down onto your own side ...
             ball.spin = 0;
-            plan_shot(ball, ball.x + (tx - ball.x) / 4, SERVE_OWN_BOUNCE_Z, SERVE_FIRST_FRAMES);
+
+            if(fast && quality == SERVE_PERFECT)
+            {
+                plan_shot(ball, ball.x + (tx - ball.x) / 4, SERVE_OWN_BOUNCE_Z, SERVE_PERFECT_HOP_FRAMES, 1);
+            }
+            else
+            {
+                plan_shot(ball, ball.x + (tx - ball.x) / 4, SERVE_OWN_BOUNCE_Z, SERVE_FIRST_FRAMES);
+            }
 
             // ... then (after that bounce) on to here.
             serve_bounce_pending = true;
