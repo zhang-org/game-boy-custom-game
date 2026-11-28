@@ -153,11 +153,14 @@ namespace sb
                 // title bar: "< Serve      A: Play  B: Map      1/4 >"
                 left_arrow.set(bx(4), text_mid(0), "<", text_color::RED);
                 title.set(bx(14), text_mid(0), page.title, text_color::BLUE);
-                hint.set(bx(130), text_mid(0), hint_text, text_color::DARK, align::CENTER);
                 bn::string<8> n = to_text(index + 1);
                 n.append("/");
                 n.append(to_text(count));
                 number.set(bx(229), text_mid(0), n, text_color::DARK, align::RIGHT);
+                // the hint goes in the middle of the space left between the title and the page number
+                int gap_left = 14 + text_width(page.title);
+                int gap_right = 229 - text_width(n);
+                hint.set(bx((gap_left + gap_right) / 2), text_mid(0), hint_text, text_color::DARK, align::CENTER);
                 right_arrow.set(bx(236), text_mid(0), ">", text_color::RED, align::RIGHT);
 
                 // the labels
