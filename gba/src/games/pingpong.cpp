@@ -594,9 +594,10 @@ namespace
             {
                 frame = sb::FRAME_CHEER;
             }
-            else if(smash > 0 && smash_t < 5)
+            else if(smash > 0 && smash_t < 6)
             {
-                frame = sb::FRAME_CHEER;                // arms up, ready to slam
+                frame = sb::FRAME_SIDE;                 // still turned to the side it wound up on
+                flip = paddle_side < 0;
             }
             else if(serve_stance || serve_swing > 0)
             {
@@ -642,8 +643,9 @@ namespace
             }
             else if(smash > 0)
             {
-                // Release: from the wind-up (high and back on its side), down and forward through the ball,
-                // then a big follow-through high across the body to the other side.
+                // Release, like a table tennis topspin: from the wind-up (low and back on its side), up and
+                // forward through the ball, then the arm carries on up across the body to finish high on the
+                // other side.
                 --smash;
                 int side = paddle_side;
                 bn::fixed top = cy - lift;
@@ -651,12 +653,12 @@ namespace
                 // Keyframes: frame time, paddle x, paddle y, paddle frame, which way the blade points.
                 struct key { int t; bn::fixed px, py; int frame, pside; };
                 const key keys[] = {
-                    { 0,  x + side * 15, top - 12, 0, side },      // wound up
-                    { 3,  x + side * 14, top - 4,  1, side },      // coming down and forward
+                    { 0,  x + side * 14, top + 10, 2, side },      // wound up: low and back
+                    { 3,  x + side * 13, top + 2,  1, side },      // coming up and forward
                     { 5,  hit_x,         swing_y,  1, side },      // through the ball
-                    { 8,  x - side * 2,  top + 2,  1, -side },     // across the front of the body
-                    { 11, x - side * 11, top - 9,  0, -side },     // follow-through, high on the other side
-                    { SMASH_ANIM_FRAMES, x - side * 11, top - 9, 0, -side },
+                    { 8,  x + side * 2,  top - 10, 0, side },      // still rising in front of the body
+                    { 11, x - side * 7,  top - 15, 0, -side },     // finish: high, over on the other side
+                    { SMASH_ANIM_FRAMES, x - side * 7, top - 15, 0, -side },
                 };
                 int k = 0;
 
@@ -737,14 +739,14 @@ namespace
             }
             else if(charge_side != 0)
             {
-                // Winding up: the paddle goes back and up as the meter fills (to where the release swing
+                // Winding up: the paddle drops back and down as the meter fills (to where the release swing
                 // starts), trembling when the meter is full.
                 bn::fixed f = bn::fixed(bn::min(charge_pct, 100)) / 100;
-                pframe = f < bn::fixed(0.5) ? 1 : 0;
+                pframe = f < bn::fixed(0.5) ? 1 : 2;
                 pside = charge_side;
                 int shake = charge_full && (sb::frame_count() & 2) ? 1 : 0;
-                px = x + charge_side * (9 + 6 * f) + shake;
-                py = cy + 3 - 15 * f;
+                px = x + charge_side * (9 + 5 * f) + shake;
+                py = cy + 3 + 7 * f;
             }
             else if(windup > 0)
             {
@@ -1095,36 +1097,40 @@ namespace
             bounces = 0;
             serve_bounce_pending = false;
             cpu->serve_stance = false;
+            cpu->cheering = false;
+            cpu->windup = 0;
+            cpu_target_z = CPU_HOME_Z;
+            caught = false;
+
+            // Follow / Random flow like a rally: the robot's next ball leaves you where you are, still
+            // charging a smash if you are.
+            if(rally_drill())
+            {
+                hint_label.clear();
+                robot_wait = 1;
+
+                if(! target_ready)
+                {
+                    pick_robot_target();
+                }
+
+                hold_ball_at_server();
+                return;
+            }
+
             hide_serve_bar();
             serve_wait_release = false;
             stop_charging();
             me->cheering = false;
-            cpu->cheering = false;
-            cpu->windup = 0;
             me->z = PLAYER_START_Z;
-            cpu_target_z = CPU_HOME_Z;
             trail_timer = 0;
-            caught = false;
 
             if(training)
             {
                 message_label.clear();
                 message_timer = 0;
 
-                if(server == PLAYER)
-                {
-                    hint_label.set(-116, 70, "Hold A: topspin  B: backspin", sb::text_color::WHITE);
-                }
-                else
-                {
-                    hint_label.clear();
-                    robot_wait = 1;
-
-                    if(! target_ready)
-                    {
-                        pick_robot_target();
-                    }
-                }
+                hint_label.set(-116, 70, "Hold A: topspin  B: backspin", sb::text_color::WHITE);
 
                 hold_ball_at_server();
                 return;
@@ -1166,6 +1172,12 @@ namespace
         }
 
         // ------------------------------------------------------------------------------- the ball robot
+        // Follow or Random: the robot keeps shooting and play never stops.
+        bool rally_drill() const
+        {
+            return training && drill != DRILL_SERVE;
+        }
+
         bn::fixed robot_mouth_x() const
         {
             return bn::fixed(ROBOT_HEAD_X) + robot_aim * 2;
@@ -1257,8 +1269,13 @@ namespace
             point_decided = true;
             st = state::POINT;
             timer = 0;
-            stop_charging();
             serve_bounce_pending = false;
+
+            if(drill == DRILL_SERVE)
+            {
+                stop_charging();
+            }
+
             sb::sfx(good ? bn::sound_items::sfx_point : bn::sound_items::sfx_miss);
 
             if(drill == DRILL_SERVE)
@@ -1267,9 +1284,9 @@ namespace
 
                 if(good)
                 {
-                    const char* text = serve_quality_of_last == SERVE_PERFECT ? "In! Perfect serve!" :
-                                       serve_quality_of_last == SERVE_GOOD ? "In! Strong serve" :
-                                       serve_quality_of_last == SERVE_OK ? "In!" : "In, but weak";
+                    const char* text = serve_quality_of_last == SERVE_PERFECT ? "Perfect serve!" :
+                                       serve_quality_of_last == SERVE_GOOD ? "Strong serve!" :
+                                       serve_quality_of_last == SERVE_OK ? "Good serve" : "Weak serve";
                     show_message(text, sb::text_color::YELLOW, TRAIN_PAUSE_FRAMES);
                 }
                 else
@@ -2279,7 +2296,8 @@ namespace
             a_hold = bn::keypad::a_held() ? a_hold + 1 : 0;
             b_hold = bn::keypad::b_held() ? b_hold + 1 : 0;
 
-            bool can_charge = st == state::RALLY && ! point_decided && ! me->cheering;
+            // (In Follow / Random you can wind up any time, even before the robot's next ball is out.)
+            bool can_charge = ((st == state::RALLY && ! point_decided) || rally_drill()) && ! me->cheering;
 
             if(! charging)
             {
