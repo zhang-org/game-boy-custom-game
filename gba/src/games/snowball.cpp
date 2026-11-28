@@ -1266,7 +1266,7 @@ namespace
     bool choose_level()
     {
         sb::label title;
-        title.set(0, -60, "How tough is the family?", sb::text_color::WHITE, sb::align::CENTER);
+        title.set(0, -60, "How tough is everyone?", sb::text_color::WHITE, sb::align::CENTER);
         constexpr bn::string_view items[] = { "Easy", "Medium", "Hard" };
         int choice = sb::menu(11, 5, items, g_level_choice, true);
         sb::panel_clear();
@@ -1371,7 +1371,7 @@ void sb::snowball_run()
     // Shown on the start screen (scroll with Up/Down) and in the pause menu. '#' = heading.
     static constexpr bn::string_view howto[] = {
         "#Defend your fort!",
-        "The family hides behind",
+        "Everyone hides behind",
         "three snow piles: left,",
         "middle and right. They",
         "pop up to throw.",

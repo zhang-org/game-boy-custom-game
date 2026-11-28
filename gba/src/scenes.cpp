@@ -124,7 +124,7 @@ namespace sb
             logo.set_y(logo_y);
             now = stage::TITLE;
             stage_time = 100;
-            subtitle.set(0, -22, "Family Winter Games", text_color::YELLOW, align::CENTER);
+            subtitle.set(0, -22, "Christmas Mini Games", text_color::YELLOW, align::CENTER);
         };
 
         while(! done)
@@ -269,7 +269,7 @@ namespace sb
 
                         if(logo_speed == 0)
                         {
-                            subtitle.set(0, -22, "Family Winter Games", text_color::YELLOW, align::CENTER);
+                            subtitle.set(0, -22, "Christmas Mini Games", text_color::YELLOW, align::CENTER);
                         }
                     }
 
