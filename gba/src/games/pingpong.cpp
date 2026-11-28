@@ -1,4 +1,4 @@
-// Ping Pong Pals: table tennis against a CPU family member.
+// Ping Pong Pals: table tennis against a CPU opponent (one of the other characters).
 //
 // Seen from a 3/4 top-down angle: you stand at the bottom (seen from behind), the CPU at the top.
 // The ball lives in 3D world coordinates:
@@ -106,7 +106,7 @@ namespace
     constexpr bn::fixed FLOOR_FRICTION = 0.7;   // sideways speed kept when bouncing on the floor
     constexpr bn::fixed NET_HEIGHT = 7;         // the ball must be higher than this to cross the net
     constexpr bn::fixed NET_MARGIN = 4;         // planned shots clear the net by at least this much
-    constexpr int SHOT_MIN_FRAMES = 12;         // no shot is ever faster than this
+    constexpr int SHOT_MIN_FRAMES = 16;         // no shot is ever faster than this
     constexpr int SPIN_KICK = 14;               // a spinning ball jumps sideways this many frames' worth of spin when it bounces
 
     // ---- You
@@ -176,7 +176,11 @@ namespace
     constexpr int SERVE_FIRST_FRAMES = 12;      // flight time from the paddle to that first bounce
     constexpr int SERVE_AIM_X = 30;
     // Fast serve (A): flight frames after the first bounce, and CPU power. [weak, ok, strong, perfect]
-    constexpr int SERVE_FAST_FRAMES[4] = { 46, 40, 34, 12 };   // (a perfect one is much faster than a smash)
+    constexpr int SERVE_FAST_FRAMES[4] = { 46, 40, 34, 16 };
+    // A plain ball starting low off your side must arc up to clear the net, so plan_shot stretches any fast
+    // serve to about 34 frames. A PERFECT topspin serve instead dips hard (extra pull down while it flies),
+    // so it can be fast and still clear the net: about 2.9 px/frame, a bit faster than the fastest smash.
+    constexpr bn::fixed SERVE_TOPSPIN_DIP = 0.3;
     constexpr int SERVE_FAST_POWER[4] = { 10, 20, 32, 46 };
     constexpr int SERVE_FAST_DEPTH = -26;
     // Spin serve (B): slower, but curves and kicks sideways after it bounces. [weak, ok, strong, perfect]
@@ -357,6 +361,7 @@ namespace
     {
         bn::fixed x, z, h, vx, vz, vh;
         bn::fixed spin;     // sideways push added to vx every frame
+        bn::fixed dip = 0;  // extra pull down every frame (heavy topspin), gone after the next bounce
     };
 
     // What was picked last time in the menu: the difficulty (index into LEVELS / TRAIN_LEVELS), match or
@@ -377,7 +382,7 @@ namespace
         b.vx += b.spin;
         b.x += b.vx;
         b.z += b.vz;
-        b.vh -= GRAVITY;
+        b.vh -= GRAVITY + b.dip;
         b.h += b.vh;
 
         // The net: crossing z = 0 too low.
@@ -403,6 +408,7 @@ namespace
             if(over_table(b.x, b.z) && b.h <= 0 && b.h - b.vh > -3)
             {
                 b.h = 0;
+                b.dip = 0;
                 b.vh = -b.vh * TABLE_BOUNCE;
 
                 // Spin makes the ball jump sideways off the table, then it fades.
@@ -422,6 +428,7 @@ namespace
             if(b.h <= -TABLE_HEIGHT)
             {
                 b.h = -TABLE_HEIGHT;
+                b.dip = 0;
                 b.vh = -b.vh * FLOOR_BOUNCE;
                 b.vx = b.vx * FLOOR_FRICTION;
                 b.vz = b.vz * FLOOR_FRICTION;
@@ -440,9 +447,9 @@ namespace
     }
 
     // Height after t frames of flight (matches step_ball exactly while nothing is touched).
-    bn::fixed height_after(bn::fixed h0, bn::fixed vh0, int t)
+    bn::fixed height_after(bn::fixed h0, bn::fixed vh0, int t, bn::fixed gravity)
     {
-        return h0 + vh0 * t - GRAVITY * (t * (t + 1) / 2);
+        return h0 + vh0 * t - gravity * (t * (t + 1) / 2);
     }
 
     // Aims the ball at (tx, tz) on the table, landing after `frames` frames (allowing for b.spin).
@@ -450,12 +457,13 @@ namespace
     void plan_shot(ball_state& b, bn::fixed tx, bn::fixed tz, int frames)
     {
         frames = bn::max(frames, SHOT_MIN_FRAMES);
+        bn::fixed gravity = GRAVITY + b.dip;
 
         for(int attempt = 0; attempt < 30; ++attempt, frames += 2)
         {
             b.vx = (tx - b.x - b.spin * (frames * (frames + 1) / 2)) / frames;
             b.vz = (tz - b.z) / frames;
-            b.vh = (GRAVITY * (frames * (frames + 1) / 2) - b.h) / frames;
+            b.vh = (gravity * (frames * (frames + 1) / 2) - b.h) / frames;
 
             if(b.vz == 0)
             {
@@ -471,7 +479,7 @@ namespace
 
             int t = t_net.ceil_integer();
 
-            if(height_after(b.h, b.vh, t) >= NET_HEIGHT + NET_MARGIN)
+            if(height_after(b.h, b.vh, t, gravity) >= NET_HEIGHT + NET_MARGIN)
             {
                 return;
             }
@@ -2129,6 +2137,8 @@ namespace
 
                     // A good serve: on over the net now.
                     ball.spin = serve_spin;
+                    ball.dip = hitter == PLAYER && last_shot == SHOT_SERVE_FAST && serve_quality_of_last == SERVE_PERFECT ?
+                               SERVE_TOPSPIN_DIP : bn::fixed(0);
                     plan_shot(ball, serve_tx, serve_tz, serve_frames);
 
                     if(hitter == PLAYER && serve_quality_of_last == SERVE_PERFECT)
@@ -2955,7 +2965,7 @@ namespace
         constexpr bn::string_view drills[] = { "Serve", "Follow", "Random" };
         constexpr bn::string_view levels[] = { "Easy", "Medium", "Hard" };
         constexpr bn::string_view names[] = { "Play", "Drill", "Level" };
-        constexpr const char* match_hint = "Play a family member.";
+        constexpr const char* match_hint = "Play an opponent.";
         constexpr const char* drill_hints[] = { "Practise your serve.", "The robot aims at you.", "Watch where it aims!" };
         constexpr int box_x = 2, box_w = 26;
         constexpr int option_x = (box_x + 7) * 8 - 120;  // where the choices start (Butano x)
