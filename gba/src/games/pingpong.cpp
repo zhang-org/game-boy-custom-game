@@ -632,7 +632,8 @@ namespace
             else if(charge_side != 0 || windup != 0)
             {
                 frame = sb::FRAME_SIDE;                 // body turned: forehand or backhand
-                flip = (charge_side != 0 ? charge_side : windup) < 0;
+                // Turned towards the paddle side: your charge side, or for the CPU the side opposite its shot.
+                flip = charge_side != 0 ? charge_side < 0 : windup > 0;
             }
             else
             {
@@ -676,7 +677,17 @@ namespace
                 bn::fixed hit_x = swing_x - side * 3;
                 // Keyframes: frame time, paddle x, paddle y, paddle frame, which way the blade points.
                 struct key { int t; bn::fixed px, py; int frame, pside; };
-                const key keys[] = {
+                // The CPU faces you, so "forwards" is down the screen: its follow-through stays flat and carries
+                // on across and towards you, only tilting up a little at the end.
+                const key cpu_keys[] = {
+                    { 0,  x + side * 11, top + 8,  3, side },
+                    { SMASH_CONTACT_FRAMES, hit_x, swing_y, 1, side },
+                    { 4,  x + side * 3,  top + 9,  1, side },
+                    { 6,  x - side * 5,  top + 11, 1, -side },
+                    { 8,  x - side * 10, top + 8,  4, -side },
+                    { SMASH_ANIM_FRAMES, x - side * 10, top + 8, 4, -side },
+                };
+                const key my_keys[] = {
                     { 0,  x + side * 11, top + 8,  3, side },      // wound up: low and back, blade angled down
                     { SMASH_CONTACT_FRAMES, hit_x, swing_y, 1, side },  // through the ball
                     { 4,  x + side * 5,  top - 7,  4, side },      // rising in front of the body
@@ -684,6 +695,7 @@ namespace
                     { 8,  x - side * 7,  top - 15, 0, -side },     // finish: high, over on the other side
                     { SMASH_ANIM_FRAMES, x - side * 7, top - 15, 0, -side },
                 };
+                const key* keys = facing_up ? my_keys : cpu_keys;
                 int k = 0;
 
                 while(k < 4 && smash_t >= keys[k + 1].t)
@@ -782,9 +794,10 @@ namespace
                 bn::fixed f = bn::min(bn::fixed(windup_t) / 12, bn::fixed(1));
                 bn::fixed back = f < bn::fixed(0.5) ? f * 4 : bn::fixed(2);
                 bn::fixed down = f < bn::fixed(0.5) ? f * 4 : 2 + (f - bn::fixed(0.5)) * 6;
+                int side = -windup;     // its paddle starts on the other side from where the shot goes
                 pframe = f < bn::fixed(0.5) ? 1 : 3;
-                pside = windup;
-                px = x + windup * (9 + back);
+                pside = side;
+                px = x + side * (9 + back);
                 py = cy + 3 + down;
             }
 
@@ -866,8 +879,9 @@ namespace
         int charge_button = 0;      // 1 = A (forehand), 2 = B (backhand)
         int charge = 0;
         bool last_perfect = false;  // your last hit was a PERFECT smash / shot
-        int ball_hold = 0;          // a smash: frames until the paddle reaches the ball (it waits until then)
+        int ball_hold = 0;          // a smash or a CPU shot: frames until the paddle reaches the ball (it waits)
         bool pending_perfect = false;
+        bool contact_by_cpu = false, contact_attack = false;
         int incoming_power = 0;     // how hard your last shot was (the CPU recovers slower from hard ones)
 
         // ---- effects
@@ -879,8 +893,8 @@ namespace
         cpu_plan plan = PLAN_NORMAL;
         bn::fixed cpu_target_x = 0, cpu_target_z = CPU_HOME_Z;
         bn::fixed cpu_shot_x = 0;   // where its next shot will go ...
-        bn::fixed cpu_shot_offset = 0; // ... as a distance from where it will stand (+ = to its right on screen)
-        int cpu_shot_side = 1;      // +1 forehand (to its right), -1 backhand: it shows this before it hits
+        int cpu_shot_side = 1;      // which way its shot goes on screen: +1 right (a forehand: its paddle starts on
+                                    // the screen-left, its own right hand), -1 left (a backhand). Its wind-up shows it.
         int cpu_reaction = 0;
 
         // ---- training with the ball robot (no opponent, no crowd, the basement)
@@ -1128,6 +1142,7 @@ namespace
             cpu_target_z = CPU_HOME_Z;
             caught = false;
             ball_hold = 0;
+            contact_by_cpu = false;
 
             // Follow / Random flow like a rally: the robot's next ball leaves you where you are, still
             // charging a smash if you are.
@@ -1566,6 +1581,13 @@ namespace
         // The paddle reached the ball: off it goes.
         void smash_contact()
         {
+            if(contact_by_cpu)
+            {
+                contact_by_cpu = false;
+                sb::sfx(contact_attack ? bn::sound_items::sfx_smash : bn::sound_items::sfx_paddle);
+                return;
+            }
+
             start_trail(ball.x, ball_screen_y(), 40);
 
             if(pending_perfect)
@@ -1699,12 +1721,13 @@ namespace
         void cpu_hit()
         {
             int speedup = bn::min(rally_hits / RALLY_HITS_PER_SPEEDUP, RALLY_SPEEDUP_MAX);
-            cpu->start_topspin(ball.x, ball_screen_y(), cpu->windup != 0 ? cpu->windup : ball.x >= cpu->x ? 1 : -1);
+            // (Its paddle is on the other side from where the shot goes, then swings across.)
+            cpu->start_topspin(ball.x, ball_screen_y(), cpu->windup != 0 ? -cpu->windup : ball.x >= cpu->x ? 1 : -1);
             cpu->windup = 0;
             ball.spin = 0;
             shot_kind kind = SHOT_CPU_NORMAL;
-            // Its shot goes to the side it showed: right of it for a forehand, left for a backhand.
-            bn::fixed tx = clamp(cpu->x + cpu_shot_offset, -(TABLE_HALF_W - 4), TABLE_HALF_W - 4);
+            // Its shot goes the way it showed (see think_cpu).
+            bn::fixed tx = cpu_shot_x;
 
             switch(plan)
             {
@@ -1755,7 +1778,12 @@ namespace
             }
 
             after_hit(CPU, kind, 0);
-            sb::sfx(kind == SHOT_CPU_ATTACK ? bn::sound_items::sfx_smash : bn::sound_items::sfx_paddle);
+
+            // Like yours, the ball waits for its paddle; the sound comes on contact.
+            ball_hold = SMASH_CONTACT_FRAMES;
+            pending_perfect = false;
+            contact_by_cpu = true;
+            contact_attack = kind == SHOT_CPU_ATTACK;
         }
 
         void after_hit(int who, shot_kind kind, int power)
@@ -1966,24 +1994,21 @@ namespace
                 break;
             }
 
-            // Forehand or backhand? Seen on screen, a forehand sends the ball to the right of where it
-            // stands, a backhand to the left. Near the edge of the table only one of them fits.
-            cpu_shot_offset = cpu_shot_x - cpu_target_x;
-
-            if(cpu_target_x > 26)
+            // Forehand or backhand? It faces you, so its forehand (its right hand, on the screen-left) swings
+            // across and sends the ball to the screen-right, and its backhand the other way, like yours seen in
+            // a mirror. The shot goes at least a little to one side of where it meets the ball.
+            if(bn::abs(cpu_shot_x - at.x) < 10)
             {
-                cpu_shot_offset = -bn::max(bn::abs(cpu_shot_offset), bn::fixed(12));
-            }
-            else if(cpu_target_x < -26)
-            {
-                cpu_shot_offset = bn::max(bn::abs(cpu_shot_offset), bn::fixed(12));
-            }
-            else if(bn::abs(cpu_shot_offset) < 10)
-            {
-                cpu_shot_offset = cpu_shot_offset >= 0 ? 10 : -10;
+                cpu_shot_x = at.x + (cpu_shot_x >= at.x ? 10 : -10);
             }
 
-            cpu_shot_side = cpu_shot_offset >= 0 ? 1 : -1;
+            cpu_shot_x = clamp(cpu_shot_x, -(TABLE_HALF_W - 4), TABLE_HALF_W - 4);
+            cpu_shot_side = cpu_shot_x >= at.x ? 1 : -1;
+
+            // It stands so the ball comes to its paddle side: right of the ball for a forehand, left of it for a
+            // backhand.
+            int paddle = -cpu_shot_side;
+            cpu_target_x = clamp(at.x - paddle * CPU_HAND_OFFSET, -CPU_X_LIMIT, CPU_X_LIMIT);
 
             if(DEBUG_LOG)
             {
