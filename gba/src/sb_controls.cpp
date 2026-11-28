@@ -274,8 +274,7 @@ namespace sb
         controls_animation* g_animation = nullptr;
     }
 
-    bool controls_pages(bn::span<const controls_page> pages, controls_animation& animation, bool intro,
-                        bool must_read)
+    bool controls_pages(bn::span<const controls_page> pages, controls_animation& animation, bool intro)
     {
         if(pages.empty())
         {
@@ -299,7 +298,8 @@ namespace sb
                 redraw = false;
                 t = 0;
                 bool last = page == pages.size() - 1;
-                const char* hint = ! intro ? "B: Back" : must_read && ! last ? "A: Next  B: Map" : "A: Play  B: Map";
+                const char* hint = intro ? (last ? "A: Play  B: Map" : "A: Next  B: Map") :
+                                           (last ? "A: Play  B: Back" : "A: Next  B: Back");
                 view.show(pages[page], page, pages.size(), hint);
             }
 
@@ -320,9 +320,9 @@ namespace sb
                 sfx(bn::sound_items::sfx_select);
                 redraw = true;
             }
-            else if(intro && (bn::keypad::a_pressed() || bn::keypad::start_pressed()))
+            else if(bn::keypad::a_pressed() || bn::keypad::start_pressed())
             {
-                if(must_read && page < pages.size() - 1)
+                if(bn::keypad::a_pressed() && page < pages.size() - 1)
                 {
                     ++page;
                     sfx(bn::sound_items::sfx_select);
@@ -335,7 +335,7 @@ namespace sb
                     break;
                 }
             }
-            else if(bn::keypad::b_pressed() || (! intro && (bn::keypad::a_pressed() || bn::keypad::start_pressed())))
+            else if(bn::keypad::b_pressed())
             {
                 sfx(bn::sound_items::sfx_back);
                 break;
@@ -349,10 +349,21 @@ namespace sb
     bool game_intro_pages(int game, bn::span<const controls_page> pages, controls_animation& animation)
     {
         set_controls_pages(pages, &animation);
-        bool must_read = ! howto_seen(game);
-        bool play = controls_pages(pages, animation, true, must_read);
 
-        if(play && must_read)
+        if(howto_seen(game))
+        {
+            // Seen them before: straight on (they're under "How to play" in the pause menu).
+            if(is_faded())
+            {
+                fade_in();
+            }
+
+            return true;
+        }
+
+        bool play = controls_pages(pages, animation, true);
+
+        if(play)
         {
             set_howto_seen(game);
         }
@@ -366,14 +377,13 @@ namespace sb
         g_animation = animation;
     }
 
-    bool show_controls_pages()
+    int show_controls_pages()
     {
         if(g_pages.empty() || ! g_animation)
         {
-            return false;
+            return -1;
         }
 
-        controls_pages(g_pages, *g_animation, false, false);
-        return true;
+        return controls_pages(g_pages, *g_animation, false) ? 1 : 0;
     }
 }

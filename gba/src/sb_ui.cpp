@@ -463,17 +463,20 @@ namespace sb
     }
 
     // "How to play" from the pause menu: the game's controls pages if it has them, otherwise the same
-    // instructions as on the start screen, scrollable, B or A to close.
-    void show_howto()
+    // instructions as on the start screen, scrollable, B or A to close. Returns true to go straight back to
+    // the game (A on the last controls page).
+    bool show_howto()
     {
-        if(show_controls_pages())
+        int pages = show_controls_pages();
+
+        if(pages >= 0)
         {
-            return;     // the game has picture pages (sb_controls.h)
+            return pages == 1;      // the game has picture pages (sb_controls.h)
         }
 
         if(g_howto.empty())
         {
-            return;
+            return false;
         }
 
         constexpr int x = 2, y = 1, w = 26, h = 18;
@@ -501,6 +504,7 @@ namespace sb
         }
 
         clear_rect(x, y, w, h);
+        return false;
     }
 
     bool game_pause()
@@ -521,7 +525,12 @@ namespace sb
 
             if(choice == 1)
             {
-                show_howto();
+                if(show_howto())
+                {
+                    update();
+                    return false;   // A on the last page: back to the game
+                }
+
                 continue;
             }
 
