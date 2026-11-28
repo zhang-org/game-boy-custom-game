@@ -16,6 +16,7 @@
 #include "bn_sound_items.h"
 
 #include "sb_audio.h"
+#include "sb_controls.h"
 #include "sb_core.h"
 #include "sb_games.h"
 #include "sb_save.h"
@@ -461,9 +462,15 @@ namespace sb
         return result;
     }
 
-    // "How to play" from the pause menu: the same instructions, scrollable, B or A to close.
+    // "How to play" from the pause menu: the game's controls pages if it has them, otherwise the same
+    // instructions as on the start screen, scrollable, B or A to close.
     void show_howto()
     {
+        if(show_controls_pages())
+        {
+            return;     // the game has picture pages (sb_controls.h)
+        }
+
         if(g_howto.empty())
         {
             return;
