@@ -106,7 +106,7 @@ namespace
     constexpr bn::fixed FLOOR_FRICTION = 0.7;   // sideways speed kept when bouncing on the floor
     constexpr bn::fixed NET_HEIGHT = 7;         // the ball must be higher than this to cross the net
     constexpr bn::fixed NET_MARGIN = 4;         // planned shots clear the net by at least this much
-    constexpr int SHOT_MIN_FRAMES = 18;         // no shot is ever faster than this
+    constexpr int SHOT_MIN_FRAMES = 15;         // no shot is ever faster than this
     constexpr int SPIN_KICK = 14;               // a spinning ball jumps sideways this many frames' worth of spin when it bounces
 
     // ---- You
@@ -176,7 +176,7 @@ namespace
     constexpr int SERVE_FIRST_FRAMES = 12;      // flight time from the paddle to that first bounce
     constexpr int SERVE_AIM_X = 30;
     // Fast serve (A): flight frames after the first bounce, and CPU power. [weak, ok, strong, perfect]
-    constexpr int SERVE_FAST_FRAMES[4] = { 46, 40, 34, 21 };   // (a perfect one flies like a smash)
+    constexpr int SERVE_FAST_FRAMES[4] = { 46, 40, 34, 16 };   // (a perfect one is even faster than a smash)
     constexpr int SERVE_FAST_POWER[4] = { 10, 20, 32, 46 };
     constexpr int SERVE_FAST_DEPTH = -26;
     // Spin serve (B): slower, but curves and kicks sideways after it bounces. [weak, ok, strong, perfect]
@@ -237,7 +237,7 @@ namespace
         //  name      feed gap  miss  front back charge
         { "Easy",     64,  30,  60,   12,   4,   30 },
         { "Medium",   52,  22,  50,   8,    2,   24 },
-        { "Hard",     42,  14,  40,   5,    1,   20 },
+        { "Hard",     34,  6,   34,   5,    1,   20 },
     };
 
     constexpr int TRAIN_PAUSE_FRAMES = 40;      // serve practice: pause after each serve
@@ -275,7 +275,8 @@ namespace
     constexpr int POINT_PAUSE_FRAMES = 80;      // pause after a point
     constexpr int MATCH_END_FRAMES = 110;       // the winner cheers this long before the result box
     constexpr int SWING_FRAMES = 12;            // length of the normal swing animation
-    constexpr int SMASH_ANIM_FRAMES = 16;       // length of the jumping smash animation
+    constexpr int SMASH_ANIM_FRAMES = 12;       // length of the jumping smash animation
+    constexpr int SMASH_CONTACT_FRAMES = 2;     // the paddle meets the ball this long after you let go
     constexpr int PERFECT_FREEZE_FRAMES = 7;    // hit-stop on a PERFECT shot
     constexpr int PERFECT_SHAKE_FRAMES = 14;    // screen shake after it
     constexpr bn::fixed PERFECT_FLASH = 0.6;    // white flash strength (fades out)
@@ -533,6 +534,7 @@ namespace
         bool cheering = false;
         bool serve_stance = false;  // sideways and bent over, getting ready to serve
         int serve_swing = 0;        // counts down during the serve's own swing
+        int serve_dir = 1;          // you serving: 1 = facing right (left half of the table), -1 = facing left
         bool facing_up;
 
         actor(int chr, bool up, bn::fixed start_x, bn::fixed start_z) :
@@ -584,7 +586,7 @@ namespace
             if(smash > 0)
             {
                 // A little jump: up for 6 frames, then back down.
-                lift = smash_t < 6 ? smash_t : bn::max(0, 12 - smash_t);
+                lift = smash_t < 4 ? smash_t : bn::max(0, 8 - smash_t);
             }
 
             int frame;
@@ -594,7 +596,7 @@ namespace
             {
                 frame = sb::FRAME_CHEER;
             }
-            else if(smash > 0 && smash_t < 6)
+            else if(smash > 0 && smash_t < 4)
             {
                 frame = sb::FRAME_SIDE;                 // still turned to the side it wound up on
                 flip = paddle_side < 0;
@@ -602,7 +604,7 @@ namespace
             else if(serve_stance || serve_swing > 0)
             {
                 frame = sb::FRAME_SIDE;                 // side-on to the table, like a real serve
-                flip = ! facing_up;                     // (the CPU faces the other way)
+                flip = facing_up ? serve_dir < 0 : true;   // (the CPU faces the other way)
                 lift = serve_stance ? -2 : 0;           // bent over a little while waiting
             }
             else if(charge_side != 0 || windup != 0)
@@ -653,11 +655,11 @@ namespace
                 // Keyframes: frame time, paddle x, paddle y, paddle frame, which way the blade points.
                 struct key { int t; bn::fixed px, py; int frame, pside; };
                 const key keys[] = {
-                    { 0,  x + side * 14, top + 10, 2, side },      // wound up: low and back
-                    { 3,  x + side * 13, top + 2,  1, side },      // coming up and forward
-                    { 5,  hit_x,         swing_y,  1, side },      // through the ball
-                    { 8,  x + side * 2,  top - 10, 0, side },      // still rising in front of the body
-                    { 11, x - side * 7,  top - 15, 0, -side },     // finish: high, over on the other side
+                    { 0,  x + side * 11, top + 8,  3, side },      // wound up: low and back, blade angled down
+                    { SMASH_CONTACT_FRAMES, hit_x, swing_y, 1, side },  // through the ball
+                    { 4,  x + side * 5,  top - 7,  4, side },      // rising in front of the body
+                    { 6,  x - side * 1,  top - 13, 0, side },      // up past the face
+                    { 8,  x - side * 7,  top - 15, 0, -side },     // finish: high, over on the other side
                     { SMASH_ANIM_FRAMES, x - side * 7, top - 15, 0, -side },
                 };
                 int k = 0;
@@ -703,7 +705,7 @@ namespace
                 // The serve: from low behind the body, brushing up under the ball and forward.
                 --serve_swing;
                 int t = SERVE_SWING_FRAMES - serve_swing;
-                int dir = facing_up ? 1 : -1;
+                int dir = facing_up ? serve_dir : -1;
 
                 if(t <= 3)
                 {
@@ -731,7 +733,7 @@ namespace
             else if(serve_stance)
             {
                 // Paddle low and back behind the body.
-                int dir = facing_up ? 1 : -1;
+                int dir = facing_up ? serve_dir : -1;
                 pframe = 2;
                 pside = -dir;
                 px = x - 9 * dir;
@@ -739,14 +741,17 @@ namespace
             }
             else if(charge_side != 0)
             {
-                // Winding up: the paddle drops back and down as the meter fills (to where the release swing
-                // starts), trembling when the meter is full.
+                // Winding up: as the meter fills the paddle moves in a short arc back and down, close to the
+                // body, ending with the blade angled about 45 degrees down (where the release swing starts).
+                // It trembles when the meter is full.
                 bn::fixed f = bn::fixed(bn::min(charge_pct, 100)) / 100;
-                pframe = f < bn::fixed(0.5) ? 1 : 2;
+                bn::fixed back = f < bn::fixed(0.5) ? f * 4 : bn::fixed(2);     // out a little first ...
+                bn::fixed down = f < bn::fixed(0.5) ? f * 4 : 2 + (f - bn::fixed(0.5)) * 6;   // ... then down
+                pframe = f < bn::fixed(0.5) ? 1 : 3;
                 pside = charge_side;
                 int shake = charge_full && (sb::frame_count() & 2) ? 1 : 0;
-                px = x + charge_side * (9 + 5 * f) + shake;
-                py = cy + 3 + 7 * f;
+                px = x + charge_side * (9 + back) + shake;
+                py = cy + 3 + down;
             }
             else if(windup > 0)
             {
@@ -842,6 +847,8 @@ namespace
         int charge_button = 0;      // 1 = A (forehand), 2 = B (backhand)
         int charge = 0;
         bool last_perfect = false;  // your last hit was a PERFECT smash / shot
+        int ball_hold = 0;          // a smash: frames until the paddle reaches the ball (it waits until then)
+        bool pending_perfect = false;
         int incoming_power = 0;     // how hard your last shot was (the CPU recovers slower from hard ones)
 
         // ---- effects
@@ -1101,6 +1108,7 @@ namespace
             cpu->windup = 0;
             cpu_target_z = CPU_HOME_Z;
             caught = false;
+            ball_hold = 0;
 
             // Follow / Random flow like a rally: the robot's next ball leaves you where you are, still
             // charging a smash if you are.
@@ -1159,7 +1167,7 @@ namespace
         {
             if(server == PLAYER)
             {
-                ball = { me->x + 9, me->z - 2, 2, 0, 0, 0, 0 };
+                ball = { me->x + 9 * me->serve_dir, me->z - 2, 2, 0, 0, 0, 0 };
             }
             else if(training)
             {
@@ -1276,25 +1284,24 @@ namespace
                 stop_charging();
             }
 
-            sb::sfx(good ? bn::sound_items::sfx_point : bn::sound_items::sfx_miss);
-
             if(drill == DRILL_SERVE)
             {
+                // (How good the serve was already showed when you hit it: only a fault gets a message.)
                 rally_gap = TRAIN_PAUSE_FRAMES;
+                sb::sfx(good ? bn::sound_items::sfx_point : bn::sound_items::sfx_miss);
 
-                if(good)
-                {
-                    const char* text = serve_quality_of_last == SERVE_PERFECT ? "Perfect serve!" :
-                                       serve_quality_of_last == SERVE_GOOD ? "Strong serve!" :
-                                       serve_quality_of_last == SERVE_OK ? "Good serve" : "Weak serve";
-                    show_message(text, sb::text_color::YELLOW, TRAIN_PAUSE_FRAMES);
-                }
-                else
+                if(! good)
                 {
                     show_message(why, sb::text_color::RED, TRAIN_PAUSE_FRAMES);
                 }
 
                 return;
+            }
+
+            // Follow / Random: no "ping" when your ball lands in the net, only the miss sound.
+            if(! good)
+            {
+                sb::sfx(bn::sound_items::sfx_miss);
             }
 
             const train_level& t = TRAIN_LEVELS[g_level_choice];
@@ -1515,27 +1522,44 @@ namespace
             stop_charging();
             last_perfect = perfect;
             after_hit(PLAYER, high ? SHOT_SMASH : SHOT_POWER, power);
-            start_trail(hit_x, hit_y, 40);
+
+            // The ball waits where it is until the paddle gets there (see tick), then the hit happens:
+            // trail, sound, and for a PERFECT one the hit-stop, flash, shake and star.
+            ball_hold = SMASH_CONTACT_FRAMES;
+            pending_perfect = perfect;
 
             if(perfect)
             {
-                freeze = PERFECT_FREEZE_FRAMES;
-                shake = PERFECT_SHAKE_FRAMES;
-                flash = PERFECT_FLASH;
-                start_burst(hit_x, hit_y);
-                start_whoosh();
-                sb::sfx(bn::sound_items::sfx_pp_perfect);
                 show_message(high ? "PERFECT SMASH!" : "PERFECT SHOT!", sb::text_color::YELLOW, 50);
             }
             else
             {
-                sb::sfx(bn::sound_items::sfx_smash);
                 show_message(high ? "Smash!" : "Power shot!", sb::text_color::YELLOW, 36);
 
                 // Why it wasn't PERFECT: a small hint over your head.
                 const char* why = dz < -level->sweet_front ? "Early" : dz > level->sweet_back ? "Late" :
                                   "More power";
                 show_timing_hint(why);
+            }
+        }
+
+        // The paddle reached the ball: off it goes.
+        void smash_contact()
+        {
+            start_trail(ball.x, ball_screen_y(), 40);
+
+            if(pending_perfect)
+            {
+                freeze = PERFECT_FREEZE_FRAMES;
+                shake = PERFECT_SHAKE_FRAMES;
+                flash = PERFECT_FLASH;
+                start_burst(ball.x, ball_screen_y());
+                start_whoosh();
+                sb::sfx(bn::sound_items::sfx_pp_perfect);
+            }
+            else
+            {
+                sb::sfx(bn::sound_items::sfx_smash);
             }
         }
 
@@ -2224,6 +2248,8 @@ namespace
 
             if(! serve_aiming)
             {
+                // On the right half of the table you face left and serve the other way.
+                me->serve_dir = me->x > 0 ? -1 : 1;
                 bool a = bn::keypad::a_pressed();
                 bool b = bn::keypad::b_pressed();
 
@@ -2255,7 +2281,7 @@ namespace
             }
 
             // Next to you, on your left.
-            int bx = (me->x - 20).round_integer();
+            int bx = (me->x - 20 * me->serve_dir).round_integer();    // on the side away from the swing
             int bottom = me->center_y() + 14;          // screen y of the bar's bottom end
             serve_bar.set_position(bx, bottom - 16);
             serve_bar_top.set_position(bx, bottom - 48);
@@ -2270,7 +2296,7 @@ namespace
             // The ball is tossed up while the marker climbs, and falls back to paddle height exactly when the
             // marker reaches the middle of the red box (then keeps falling if you wait).
             bn::fixed f = serve_mark / serve_zone_pos;
-            ball.x = me->x + 6;
+            ball.x = me->x + 6 * me->serve_dir;
             ball.z = me->z - 3;
             ball.h = bn::max(bn::fixed(SERVE_PADDLE_HEIGHT) + SERVE_TOSS_HEIGHT * 4 * f * (1 - f), bn::fixed(-8));
             ball.vh = 0;
@@ -2500,6 +2526,16 @@ namespace
                 break;
 
             case state::RALLY:
+                if(ball_hold > 0)
+                {
+                    if(--ball_hold == 0)
+                    {
+                        smash_contact();
+                    }
+
+                    break;
+                }
+
                 update_ball();
                 check_hits();
                 break;
@@ -2639,7 +2675,7 @@ namespace
 
                 if(show)
                 {
-                    int k = (i + 1) * 3;
+                    int k = (i + 1) * 3 - 1;    // 2, 5, 8: (i + 1) * 3 read past the end, the sideways ghost
                     trail[i].set_position(history_x[k].round_integer(), history_y[k].round_integer());
                 }
             }

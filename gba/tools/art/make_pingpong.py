@@ -11,8 +11,9 @@ canvas pixel (0, 0) is the top-left corner of the screen):
 Sprites:
   pingpong_ball    8x8, 3 frames: small / normal / big (the ball grows a little when high)
   pingpong_shadow  8x8, 2 frames: normal / small
-  pingpong_paddle  16x16, 3 frames, blade to the RIGHT of the handle (flip for backhand):
-                   0 rest (blade up), 1 swing (blade level), 2 follow-through (blade down)
+  pingpong_paddle  16x16, 5 frames, blade to the RIGHT of the handle (flip for backhand):
+                   0 rest (blade up), 1 swing (blade level), 2 follow-through (blade down),
+                   3 smash wind-up (blade 45 degrees down), 4 smash rising (blade 45 degrees up)
   pingpong_flake   8x8, 2 frames: snowflakes falling behind the window glass
   pingpong_light   8x8, 2 frames: a tree light (on / off) for twinkling
 
@@ -471,7 +472,7 @@ HANDLE_DARK = rgb("#885030")
 
 
 def make_paddle():
-    c = Canvas(16, 48)
+    c = Canvas(16, 80)
     legend = {"o": OUTLINE, "r": PAD, "d": PAD_DARK, "l": PAD_LIGHT, "h": HANDLE, "H": HANDLE_DARK}
     # Hand position in every frame is about (5, 11).
     frames = [
@@ -525,6 +526,40 @@ def make_paddle():
          "....odrrrddo....",
          ".....oddddo.....",
          "......oooo......",
+         "................"],
+        # smash wind-up: blade 45 degrees down-right
+        ["................",
+         "................",
+         "..ooo...........",
+         "..oHho..........",
+         "...oHho.........",
+         "....oHhoo.......",
+         ".....oollroo....",
+         "......olrrrdo...",
+         ".....olrrrrrdo..",
+         ".....orrrrrrdo..",
+         ".....orrrrrrdo..",
+         "......odrrrdo...",
+         ".......odddo....",
+         "........ooo.....",
+         "................",
+         "................"],
+        # smash rising: blade 45 degrees up-right
+        ["................",
+         "................",
+         "........ooo.....",
+         ".......olllo....",
+         "......olrrrdo...",
+         ".....olrrrrrdo..",
+         ".....orrrrrrdo..",
+         ".....orrrrrrdo..",
+         "......odrrrdo...",
+         ".....oodddoo....",
+         "....oHhoo.......",
+         "...oHho.........",
+         "..oHho..........",
+         "..ooo...........",
+         "................",
          "................"],
     ]
     for i, rows in enumerate(frames):
