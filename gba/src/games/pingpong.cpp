@@ -2774,7 +2774,9 @@ namespace
             bn::fixed shadow_y = ball.z + NET_SCREEN_Y + (on_table ? bn::fixed(0) : TABLE_HEIGHT);
             shadow_sprite.set_position(ball.x.round_integer(), shadow_y.round_integer());
             bn::fixed above = ball.h - (on_table ? bn::fixed(0) : -TABLE_HEIGHT);
-            shadow_sprite.set_tiles(bn::sprite_items::pingpong_shadow.tiles_item(), above > 20 ? 1 : 0);
+            // A high ball gets the smaller, lighter shadow, except in the basement: on its dark table that one
+            // looks lighter than the table (grey), so it keeps the dark shadow.
+            shadow_sprite.set_tiles(bn::sprite_items::pingpong_shadow.tiles_item(), above > 20 && ! in_basement ? 1 : 0);
 
             if(! on_table && ball.z < TABLE_FAR_Z + 2)
             {
