@@ -10,6 +10,8 @@ Backgrounds (256x256, only the top-left 240x160 is on screen; created at (8, 48)
 Sprites:
   pingpong_robot     32x32, 5 frames: the robot's head aimed far left, left, middle, right,
                      far right (it turns to show where the next ball goes)
+  pingpong_oball     8x8, 3 frames: the robot's orange ball (small / normal / big), same shapes
+                     as pingpong_ball
 
 The table uses the same geometry as tools/art/make_pingpong.py (TABLE_*), so the game's
 physics fit both rooms.
@@ -67,6 +69,7 @@ ROBO_LIGHT = rgb("#6890e0")
 ORANGE = rgb("#f89830")
 ORANGE_DARK = rgb("#c86818")
 ORANGE_LIGHT = rgb("#f8c878")
+BALL_OUT = rgb("#583018")
 TUBE = rgb("#a8b8c8")
 LABEL = rgb("#c8d840")
 LABEL_DARK = rgb("#889020")
@@ -255,6 +258,18 @@ def draw_head(c, cx, cy, aim):
     c.vline(sx, cy - 2, cy + 3, TREAD_LIGHT)
 
 
+def make_oball():
+    c = Canvas(8, 24)
+    shapes = [
+        ["........", "........", "...##...", "..#ww#..", "..#ws#..", "...##...", "........", "........"],
+        ["........", "...##...", "..#ww#..", ".#wwws#.", ".#wwss#.", "..#ss#..", "...##...", "........"],
+        ["..####..", ".#wwww#.", "#wwwwws#", "#wwwwss#", "#wwwwss#", "#wwssss#", ".#ssss#.", "..####.."],
+    ]
+    for i, rows in enumerate(shapes):
+        c.ascii(0, i * 8, rows, {"#": BALL_OUT, "w": ORANGE, "s": ORANGE_DARK})
+    return c
+
+
 def draw_basement():
     c = Canvas(256, 256)
     draw_room(c)
@@ -282,6 +297,7 @@ def main():
     pp.save_bg("pingpong_btable", table)
     robot = make_robot()
     pp.save_sprite("pingpong_robot", robot, 32)
+    pp.save_sprite("pingpong_oball", make_oball(), 8)
     print("basement: %d colours, %d unique tiles" % (len(room.colors()), pp.count_tiles(room)))
     print("btable: %d colours, %d unique tiles" % (len(table.colors()), pp.count_tiles(table)))
     print("robot: %d colours" % len(robot.colors()))
