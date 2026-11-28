@@ -76,6 +76,7 @@
 
 #include "sb_audio.h"
 #include "sb_characters.h"
+#include "sb_controls.h"
 #include "sb_core.h"
 #include "sb_games.h"
 #include "sb_save.h"
@@ -2952,6 +2953,63 @@ namespace
             }
         }
 
+        // Everything of the match out of sight while the controls pages are open (they show their own you, ball
+        // and bars through the Miyoo's screen), and back again after. (set_room() shows the room's own things.)
+        void set_scene_hidden(bool hidden)
+        {
+            bool show = ! hidden;
+            bn::sprite_ptr* singles[] = { &ball_sprite, &shadow_sprite, &meter, &burst, &serve_bar, &serve_bar_top,
+                                          &serve_zone, &serve_marker, &robot };
+
+            for(bn::sprite_ptr* sp : singles)
+            {
+                sp->set_visible(show && sp != &meter && sp != &burst && sp != &serve_bar && sp != &serve_bar_top &&
+                                sp != &serve_zone && sp != &serve_marker);
+            }
+
+            for(bn::sprite_ptr& g : trail)
+            {
+                g.set_visible(false);
+            }
+
+            for(bn::sprite_ptr& f : flakes)
+            {
+                f.set_visible(show);
+            }
+
+            for(bn::sprite_ptr& l : lights)
+            {
+                l.set_visible(show);
+            }
+
+            for(spectator& sp : crowd)
+            {
+                sp.sprite.set_visible(show);
+            }
+
+            for(bn::sprite_ptr& d : score_cards)
+            {
+                d.set_visible(show);
+            }
+
+            if(me)
+            {
+                me->sprite.set_visible(show);
+                me->paddle.set_visible(show);
+            }
+
+            if(cpu)
+            {
+                cpu->sprite.set_visible(show);
+                cpu->paddle.set_visible(show);
+            }
+
+            if(hidden)
+            {
+                set_paused_visibility(false);   // (whoever opened the pages shows the text again: play() does)
+            }
+        }
+
         void set_paused_visibility(bool visible)
         {
             message_label.set_visible(visible);
@@ -3024,6 +3082,494 @@ namespace
                     return true;
                 }
             }
+        }
+    };
+
+    // =============================================================================================
+    // How to play: the controls pages (sb_controls.h). The Miyoo's screen shows a close-up of the hall with
+    // you acting out each page. Keep these in step with the controls above when they change.
+    // =============================================================================================
+    constexpr sb::controls_label SERVE_LABELS[] = {
+        { sb::KEY_A, "A", "Topspin" }, { 0, "", "fast and flat" },
+        { sb::KEY_B, "B", "Backspin" }, { 0, "", "slow and curvy" },
+    };
+    constexpr sb::controls_label MOVE_LABELS[] = {
+        { sb::KEY_DPAD, "", "Move left" }, { 0, "", "and right." },
+    };
+    constexpr sb::controls_label SMASH_LABELS[] = {
+        { sb::KEY_A, "A", "Forehand" }, { 0, "", "aims left" },
+        { sb::KEY_B, "B", "Backhand" }, { 0, "", "aims right" },
+        { sb::KEY_DPAD, "", "Aim wider/closer" },
+    };
+    constexpr sb::controls_label PAUSE_LABELS[] = {
+        { sb::KEY_START, "Start", "Pause" }, { 0, "", "In training:" }, { 0, "", "change drill" },
+    };
+    constexpr sb::controls_page CONTROLS_PAGES[] = {
+        { "Serve", SERVE_LABELS, "Hold, then release when the marker is in the red box.", sb::KEY_A | sb::KEY_B },
+        { "Move", MOVE_LABELS, "Your character automatically returns the ball.", sb::KEY_DPAD },
+        { "Smash", SMASH_LABELS, "Hold to charge, release to swing as the ball reaches you. Charging slows you down.",
+          sb::KEY_A | sb::KEY_B | sb::KEY_DPAD },
+        { "Pause and win", PAUSE_LABELS, "First to 5 points, win by 2. Training: pick it in the menu.",
+          sb::KEY_START },
+    };
+    enum controls_page_index { PAGE_SERVE, PAGE_MOVE, PAGE_SMASH, PAGE_PAUSE };
+
+    // The part of the hall each page shows (screen pixel of the hall at the Miyoo screen's top-left corner).
+    constexpr int PAGE_CROP[4][2] = { { 52, 84 }, { 84, 88 }, { 84, 84 }, { 84, 88 } };
+
+    class pingpong_controls : public sb::controls_animation
+    {
+
+    public:
+        explicit pingpong_controls(match& game) :
+            _game(game)
+        {
+        }
+
+        void open() override
+        {
+            _was_basement = _game.in_basement;
+            _game.set_room(false);              // the pages show the hall
+            _game.set_scene_hidden(true);
+            _body = sb::character_sprite(sb::player_character()).create_sprite(0, 0, sb::FRAME_UP);
+            _paddle = bn::sprite_items::pingpong_paddle.create_sprite(0, 0, 0);
+            _ball = bn::sprite_items::pingpong_ball.create_sprite(0, 0, 1);
+            _shadow = bn::sprite_items::pingpong_shadow.create_sprite(0, 0, 0);
+            _ghost[0] = bn::sprite_items::pingpong_ball.create_sprite(0, 0, 0);
+            _ghost[1] = bn::sprite_items::pingpong_ball.create_sprite(0, 0, 0);
+            _bar[0] = bn::sprite_items::pingpong_vbar.create_sprite(0, 0, 0);
+            _bar[1] = bn::sprite_items::pingpong_vbar.create_sprite(0, 0, 1);
+            _zone = bn::sprite_items::pingpong_vzone.create_sprite(0, 0, 1);
+            _mark = bn::sprite_items::pingpong_vmark.create_sprite(0, 0, 0);
+            _meter = bn::sprite_items::pingpong_vmeter.create_sprite(0, 0, 0);
+            _burst = bn::sprite_items::pingpong_burst.create_sprite(0, 0, 0);
+            bn::sprite_ptr* all[] = { &*_body, &*_paddle, &*_ball, &*_shadow, &*_ghost[0], &*_ghost[1], &*_bar[0],
+                                      &*_bar[1], &*_zone, &*_mark, &*_meter, &*_burst };
+            const int z[] = { 0, -1, -3, 2, -2, -2, -1, -1, -2, -3, -2, -4 };
+
+            for(int i = 0; i < 12; ++i)
+            {
+                all[i]->set_bg_priority(2);     // under the page: only the part in the Miyoo's screen shows
+                all[i]->set_z_order(z[i]);
+            }
+        }
+
+        sb::controls_state frame(int page, int t) override
+        {
+            // Move the hall so the page's part of it shows through the Miyoo's screen.
+            _dx = sb::CONTROLS_SCREEN_X - PAGE_CROP[page][0];
+            _dy = sb::CONTROLS_SCREEN_Y - PAGE_CROP[page][1];
+            _game.hall.set_position(8 + _dx, 48 + _dy);
+            _game.table.set_position(8 + _dx, 48 + _dy);
+            bn::sprite_ptr* all[] = { &*_body, &*_paddle, &*_ball, &*_shadow, &*_ghost[0], &*_ghost[1], &*_bar[0],
+                                      &*_bar[1], &*_zone, &*_mark, &*_meter, &*_burst };
+
+            for(bn::sprite_ptr* s : all)
+            {
+                s->set_visible(false);
+            }
+
+            if(page != PAGE_PAUSE)
+            {
+                _paused.clear();
+            }
+
+            switch(page)
+            {
+            case PAGE_SERVE:
+                return serve(t);
+            case PAGE_MOVE:
+                return move(t);
+            case PAGE_SMASH:
+                return smash(t);
+            default:
+                return pause(t);
+            }
+        }
+
+        void close() override
+        {
+            _body.reset();
+            _paddle.reset();
+            _ball.reset();
+            _shadow.reset();
+            _ghost[0].reset();
+            _ghost[1].reset();
+            _bar[0].reset();
+            _bar[1].reset();
+            _zone.reset();
+            _mark.reset();
+            _meter.reset();
+            _burst.reset();
+            _paused.clear();
+            _game.hall.set_position(8, 48);
+            _game.table.set_position(8, 48);
+            _game.set_scene_hidden(false);
+            _game.set_room(_was_basement);
+            _game.draw();
+        }
+
+    private:
+        static constexpr int PX = 120;      // you, in the middle (screen pixels; z = 46)
+        static constexpr int PCY = 127;
+
+        match& _game;
+        bool _was_basement = false;
+        int _dx = 0, _dy = 0;
+        bn::optional<bn::sprite_ptr> _body, _paddle, _ball, _shadow, _ghost[2], _bar[2], _zone, _mark, _meter, _burst;
+        sb::label _paused;
+
+        // Shows `sprite` (with tiles `frame` of `item`) centred on hall screen pixel (x, y).
+        void put(bn::optional<bn::sprite_ptr>& sprite, const bn::sprite_item& item, int frame, bn::fixed x, bn::fixed y,
+                 bool flip = false)
+        {
+            sprite->set_tiles(item.tiles_item(), frame);
+            sprite->set_horizontal_flip(flip);
+            sprite->set_position(x + _dx - 120, y + _dy - 80);
+            sprite->set_visible(true);
+        }
+
+        void body(int frame, bn::fixed x, bn::fixed y, bool flip = false)
+        {
+            put(_body, sb::character_sprite(sb::player_character()), frame, x, y, flip);
+        }
+
+        void paddle(int frame, bn::fixed x, bn::fixed y, bool flip = false)
+        {
+            put(_paddle, bn::sprite_items::pingpong_paddle, frame, x, y, flip);
+        }
+
+        void ball(bn::fixed x, bn::fixed y, bn::fixed shadow_y, int frame = 1)
+        {
+            put(_ball, bn::sprite_items::pingpong_ball, frame, x, y);
+            put(_shadow, bn::sprite_items::pingpong_shadow, 0, x, shadow_y);
+        }
+
+        static int walk_frame(int walk)
+        {
+            int step = (walk / 6) % 4;
+            return step == 1 ? sb::FRAME_UP_WALK_A : step == 3 ? sb::FRAME_UP_WALK_B : sb::FRAME_UP;
+        }
+
+        // ---- Serve: hold A (then B), the marker climbs while the ball is tossed, release on the red box,
+        // the serve swing, and the ball flies off. From the left corner of the table.
+        sb::controls_state serve(int t)
+        {
+            constexpr int X = 88;               // the left corner
+            constexpr int STANCE = 18, HOLD = 40, SWING = 24, REST = 16;
+            constexpr int HALF = STANCE + HOLD + SWING + REST;
+            constexpr int ZONE = 32;
+            constexpr int BAR_X = X - 20, BOTTOM = PCY + 14;
+            t %= HALF * 2;
+            unsigned button = t < HALF ? sb::KEY_A : sb::KEY_B;
+            int lt = t % HALF;
+            sb::controls_state state;
+
+            if(lt < STANCE + HOLD)
+            {
+                body(sb::FRAME_SIDE, X, PCY + 2);
+                paddle(2, X - 9, PCY + 6, true);
+
+                if(lt >= STANCE)
+                {
+                    state.pressed = button;
+                    bn::fixed mark = bn::fixed(lt - STANCE + 1) * bn::fixed(0.8);
+                    bn::fixed f = mark / ZONE;
+                    bn::fixed h = 4 + 120 * f * (1 - f);
+                    put(_bar[0], bn::sprite_items::pingpong_vbar, 0, BAR_X, BOTTOM - 16);
+                    put(_bar[1], bn::sprite_items::pingpong_vbar, 1, BAR_X, BOTTOM - 48);
+                    put(_zone, bn::sprite_items::pingpong_vzone, 1, BAR_X, BOTTOM - 2 - ZONE);
+                    put(_mark, bn::sprite_items::pingpong_vmark, 0, BAR_X, BOTTOM - 2 - mark);
+                    ball(X + 6, 128 - h, 139);
+                }
+                else
+                {
+                    ball(X + 9, 127, 139);
+                }
+            }
+            else if(lt < STANCE + HOLD + SWING)
+            {
+                int tt = lt - STANCE - HOLD + 1;
+                body(tt <= 14 ? sb::FRAME_SIDE : sb::FRAME_UP, X, PCY + (tt <= 14 ? 2 : 0));
+
+                if(tt <= 3)
+                {
+                    paddle(2, X - 9, PCY + 6, true);
+                }
+                else if(tt <= 8)
+                {
+                    bn::fixed k = bn::fixed(tt - 3) / 5;
+                    paddle(1, X - 9 + 21 * k, PCY + 6 - 10 * k);
+                }
+                else
+                {
+                    paddle(0, X + 13, PCY - 9);
+                }
+
+                if(tt <= 4)
+                {
+                    ball(X + 6, 124, 139);
+
+                    if(tt <= 3)
+                    {
+                        put(_burst, bn::sprite_items::pingpong_burst, 0, X + 6, 124);
+                    }
+                }
+                else
+                {
+                    int k = tt - 4;
+                    bn::fixed bx = X + 6 - bn::fixed(0.4) * k;
+                    bn::fixed z = 43 - bn::fixed(2.4) * k;
+                    bn::fixed hh = 0;
+
+                    if(k < 6)
+                    {
+                        hh = bn::max(bn::fixed(0), 3 - bn::fixed(0.6) * k);
+                    }
+                    else if(k < 20)
+                    {
+                        bn::fixed u = bn::fixed(k - 13) / 7;
+                        hh = 6 * (1 - u * u);
+                    }
+
+                    for(int g = 0; g < 2; ++g)
+                    {
+                        put(_ghost[g], bn::sprite_items::pingpong_ball, 0, bx + bn::fixed(1.2) * (g + 1),
+                            85 + z + bn::fixed(7.2) * (g + 1) - hh);
+                    }
+
+                    ball(bx, 85 + z - hh, 85 + z);
+                }
+            }
+            else
+            {
+                body(sb::FRAME_UP, X, PCY);
+                paddle(0, X + 9, PCY + 3);
+            }
+
+            return state;
+        }
+
+        // ---- Move: back and forth between a ball on your left and one on your right, never stopping.
+        // You swing by yourself as each one arrives. (Loops: it starts just after the hit on the right.)
+        sb::controls_state move(int t)
+        {
+            constexpr int LEFT_BALL = PX - 30, RIGHT_BALL = PX + 30;
+            constexpr int LEFT_STAND = LEFT_BALL + 10, RIGHT_STAND = RIGHT_BALL - 10;
+            constexpr int APPROACH = 16, FOLLOW = 10, LEG = APPROACH + FOLLOW;
+            t %= LEG * 2;
+            int leg = t / LEG;
+            int lt = t % LEG;
+            int side = leg == 0 ? -1 : 1;
+            int ball_x = leg == 0 ? LEFT_BALL : RIGHT_BALL;
+            int stand = leg == 0 ? LEFT_STAND : RIGHT_STAND;
+            int from = leg == 0 ? RIGHT_STAND - 16 : LEFT_STAND + 16;
+            bn::fixed cx = ball_x, cy = PCY - 6;
+            sb::controls_state state;
+
+            if(lt < APPROACH)
+            {
+                bn::fixed x = from + (stand - from) * bn::min(bn::fixed(lt + 1) * bn::fixed(1.6) / bn::abs(stand - from),
+                                                              bn::fixed(1));
+                state.dpad = stand > from ? 1 : -1;
+                body(walk_frame(t), x, PCY);
+                int swing_t = lt - APPROACH + 3;
+
+                if(swing_t >= 0)
+                {
+                    bn::fixed k = bn::fixed(swing_t + 1) / 3;
+                    bn::fixed hx = x + side * 9, hy = PCY + 3;
+                    paddle(1, hx + (cx - side * 3 - hx) * k, hy + (cy - hy) * k, side < 0);
+                }
+                else
+                {
+                    paddle(0, x + 9, PCY + 3);
+                }
+
+                bn::fixed k = bn::fixed(lt) / APPROACH;
+                bn::fixed sx = PX + side * 6, sy = 64;
+                bn::fixed bx = sx + (cx - sx) * k;
+                bn::fixed base = sy + (cy + 12 - sy) * k;
+                bn::fixed hh;
+
+                if(k < bn::fixed(0.6))
+                {
+                    bn::fixed u = k / bn::fixed(0.6);
+                    hh = 10 * (1 - u * u);
+                }
+                else
+                {
+                    bn::fixed u = (k - bn::fixed(0.6)) / bn::fixed(0.4);
+                    hh = 12 * u * (bn::fixed(1.5) - u / 2);
+                }
+
+                ball(bx, base - hh, base);
+            }
+            else
+            {
+                // hit: the follow-through while already walking back the other way, and the ball flies off
+                int ft = lt - APPROACH;
+                bn::fixed x = stand - side * bn::fixed(1.6) * (ft + 1);
+                state.dpad = -side;
+                body(walk_frame(t), x, PCY);
+
+                if(ft < 6)
+                {
+                    paddle(2, (x + side * 9 + cx - side * 3) / 2, (PCY + 3 + cy) / 2 + 2, side < 0);
+                }
+                else
+                {
+                    paddle(0, x + side * 9, PCY + 3);
+                }
+
+                bn::fixed by = cy - bn::fixed(2.6) * (ft + 1);
+                bn::fixed bx = cx - side * bn::fixed(0.6) * (ft + 1);
+                ball(bx, by, by + 10);
+            }
+
+            return state;
+        }
+
+        // ---- Smash: hold A (forehand, on your right) then B (backhand, left): the meter fills and the paddle
+        // winds back and down while the ball comes in; release as it reaches you: the swing and a PERFECT star.
+        sb::controls_state smash(int t)
+        {
+            constexpr int APPROACH = 46, AFTER = 34, HALF = APPROACH + AFTER;
+            constexpr int HOLD_FROM = 10, CHARGE_FROM = HOLD_FROM + 8, CHARGE = 24;
+            t %= HALF * 2;
+            int side = t < HALF ? 1 : -1;
+            unsigned button = side > 0 ? sb::KEY_A : sb::KEY_B;
+            int lt = t % HALF;
+            bn::fixed cx = PX + side * 11, cy = PCY - 10;
+            sb::controls_state state;
+
+            if(lt < APPROACH)
+            {
+                if(lt >= HOLD_FROM)
+                {
+                    state.pressed = button;
+                }
+
+                if(lt >= CHARGE_FROM)
+                {
+                    int pct = bn::min(100, (lt - CHARGE_FROM) * 100 / CHARGE);
+                    bn::fixed f = bn::fixed(pct) / 100;
+                    bn::fixed back = f < bn::fixed(0.5) ? f * 4 : bn::fixed(2);
+                    bn::fixed down = f < bn::fixed(0.5) ? f * 4 : 2 + (f - bn::fixed(0.5)) * 6;
+                    body(sb::FRAME_SIDE, PX, PCY, side < 0);
+                    paddle(f < bn::fixed(0.5) ? 1 : 3, PX + side * (9 + back), PCY + 3 + down, side < 0);
+                    put(_meter, bn::sprite_items::pingpong_vmeter, bn::min(8, pct * 8 / 100), PX + side * 21, PCY - 2);
+                }
+                else
+                {
+                    body(sb::FRAME_UP, PX, PCY);
+                    paddle(0, PX + 9, PCY + 3);
+                }
+
+                bn::fixed k = bn::fixed(lt) / APPROACH;
+                bn::fixed sx = PX + side * 4, sy = 70;
+                bn::fixed bx = sx + (cx - sx) * k;
+                bn::fixed base = sy + (cy + 18 - sy) * k;
+                bn::fixed hh;
+
+                if(k < bn::fixed(0.65))
+                {
+                    bn::fixed u = k / bn::fixed(0.65);
+                    hh = 10 * (1 - u * u);
+                }
+                else
+                {
+                    bn::fixed u = (k - bn::fixed(0.65)) / bn::fixed(0.35);
+                    hh = 18 * u * (bn::fixed(1.4) - u * bn::fixed(0.4));
+                }
+
+                ball(bx, base - hh, base, hh < 20 ? 1 : 2);
+            }
+            else
+            {
+                // the same swing as in the game (actor::draw): up through the ball, finish high on the other side
+                int st = lt - APPROACH;
+                int lift = st < 4 ? st : bn::max(0, 8 - st);
+                bn::fixed top = PCY - lift;
+                struct key { int t; bn::fixed dx, dy; int frame, pside; };
+                const key keys[] = {
+                    { 0, side * 11, 8, 3, side }, { 2, cx - side * 3 - PX, cy - top, 1, side },
+                    { 4, side * 5, -7, 4, side }, { 6, -side, -13, 0, side },
+                    { 8, -side * 7, -15, 0, -side }, { 12, -side * 7, -15, 0, -side },
+                };
+                int k = 0;
+
+                while(k < 4 && st >= keys[k + 1].t)
+                {
+                    ++k;
+                }
+
+                const key& a = keys[k];
+                const key& b = keys[k + 1];
+                bn::fixed f = bn::fixed(bn::min(st, b.t) - a.t) / (b.t - a.t);
+                body(st < 4 ? sb::FRAME_SIDE : sb::FRAME_UP, PX, top, side < 0 && st < 4);
+                paddle(f < bn::fixed(0.5) ? a.frame : b.frame, PX + a.dx + (b.dx - a.dx) * f,
+                       top + a.dy + (b.dy - a.dy) * f, (f < bn::fixed(0.5) ? a.pside : b.pside) < 0);
+
+                if(st < 2)
+                {
+                    ball(cx, cy, cy + 18);
+                }
+                else
+                {
+                    int k2 = st - 2;
+                    bn::fixed bx = cx - side * bn::fixed(2.2) * k2;
+                    bn::fixed by = cy - bn::fixed(3.2) * k2;
+
+                    for(int g = 0; g < 2; ++g)
+                    {
+                        put(_ghost[g], bn::sprite_items::pingpong_ball, 0, bx + side * bn::fixed(6.6) * (g + 1),
+                            by + bn::fixed(9.6) * (g + 1));
+                    }
+
+                    if(by > 60)
+                    {
+                        ball(bx, by, by + 18);
+                    }
+                }
+
+                if(st >= 2 && st < 14)
+                {
+                    put(_burst, bn::sprite_items::pingpong_burst, st < 8 ? 0 : 1, cx, cy);
+                }
+            }
+
+            return state;
+        }
+
+        // ---- Pause and win: Start, and the game stops.
+        sb::controls_state pause(int t)
+        {
+            sb::controls_state state;
+            int lt = t % 90;
+            body(sb::FRAME_UP, PX, PCY);
+            paddle(0, PX + 9, PCY + 3);
+
+            if(lt >= 30 && lt < 40)
+            {
+                state.pressed = sb::KEY_START;
+            }
+
+            if(lt >= 36)
+            {
+                if(_paused.empty())
+                {
+                    _paused.set(sb::CONTROLS_SCREEN_X + sb::CONTROLS_SCREEN_W / 2 - 120,
+                                sb::CONTROLS_SCREEN_Y + sb::CONTROLS_SCREEN_H / 2 - 80 - 6, "Paused",
+                                sb::text_color::WHITE, sb::align::CENTER);
+                }
+            }
+            else
+            {
+                _paused.clear();
+            }
+
+            return state;
         }
     };
 
@@ -3281,6 +3827,7 @@ void sb::pingpong_run()
 
     {
         match g;
+        pingpong_controls controls(g);
         play_music(bn::music_items::pingpong_song);
         fade_in();
 
@@ -3291,49 +3838,8 @@ void sb::pingpong_run()
         {
             if(first)
             {
-                // Shown on the start screen (scroll with Up/Down) and in the pause menu. '#' = heading.
-                static constexpr bn::string_view howto[] = {
-                    "#Serve",
-                    "Hold A or B and let go",
-                    "when the meter is in the",
-                    "red box: a perfect serve!",
-                    "A: topspin (fast, flat)",
-                    "B: backspin (slow, curvy)",
-                    "",
-                    "#Rally",
-                    "Move < > to return the",
-                    "ball: you swing by",
-                    "yourself.",
-                    "",
-                    "#Smash",
-                    "Ready to attack? Hold A or",
-                    "B to build up power, then",
-                    "let go just as the ball",
-                    "reaches you. Full power +",
-                    "good timing = PERFECT!",
-                    "A: forehand, aims left",
-                    "B: backhand, aims right",
-                    "You move slower while",
-                    "charging a smash.",
-                    "",
-                    "#Win",
-                    "First to 5 points, and",
-                    "you must win by 2.",
-                    "",
-                    "#Training",
-                    "Pick Training in the menu",
-                    "to practise in the",
-                    "basement with the ball",
-                    "robot. Serve: serve into",
-                    "its net. Follow: it shoots",
-                    "at you, just time your",
-                    "swing. Random: it shoots",
-                    "all over: watch its head",
-                    "to see where it aims.",
-                    "Start: change drill, quit.",
-                };
-
-                if(! game_intro(GAME_PINGPONG, howto))
+                // How to play: the controls pages (also under "How to play" in the pause menu).
+                if(! game_intro_pages(GAME_PINGPONG, CONTROLS_PAGES, controls))
                 {
                     break;
                 }
@@ -3373,6 +3879,7 @@ void sb::pingpong_run()
 
         g.hide_hud();
         fade_out();
+        set_controls_pages({}, nullptr);
     }
 
     panel_clear();
