@@ -222,13 +222,15 @@ namespace
         int good_serve_floater;     // ... and a strong serve
         int perfect_return;         // % chance it still blocks back one of your PERFECT smashes ...
         int perfect_return_close;   // ... extra % when the smash goes close to where it already stands
+        int perfect_serve_return;   // % chance it gets a PERFECT topspin serve back (as a slow, high lob) when it
+                                    // would otherwise miss it
     };
 
     constexpr cpu_level LEVELS[3] = {
-        //  name      speed react attack weak range miss tell normal attack serve spin% | charge front back  bar   perf str ok | float strong | ret close
-        { "Easy",   0.95, 12,   14,    50,  26,   82,  30,  58,    46,    58,   0,    30,    10,   3,    0.6,  2,   8,  14,  100, 40,    5,  20 },
-        { "Medium", 1.1,  10,   20,    62,  26,   92,  22,  52,    40,    52,   20,   24,    6,    1,    0.8,  1,   7,  12,  100, 30,    30, 45 },
-        { "Hard",   1.3,  8,    28,    72,  24,   102, 16,  46,    34,    44,   45,   24,    6,    1,    1.05, 1,   5,  10,  85,  20,    45, 40 },
+        //  name      speed react attack weak range miss tell normal attack serve spin% | charge front back  bar   perf str ok | float strong | ret close | serve back
+        { "Easy",   0.95, 12,   14,    50,  26,   82,  30,  58,    46,    58,   0,    30,    10,   3,    0.6,  2,   8,  14,  100, 40,    5,  20,    0 },
+        { "Medium", 1.1,  10,   20,    62,  26,   92,  22,  52,    40,    52,   20,   24,    6,    1,    0.8,  1,   7,  12,  100, 30,    30, 45,    35 },
+        { "Hard",   1.3,  8,    28,    72,  24,   102, 16,  46,    34,    44,   45,   24,    6,    1,    1.05, 1,   5,  10,  85,  20,    45, 40,    75 },
     };
 
     // ---- Training with the ball robot (same Easy / Medium / Hard choice as a match)
@@ -919,6 +921,7 @@ namespace
         int cpu_shot_side = 1;      // which way its shot goes on screen: +1 right (a forehand: its paddle starts on
                                     // the screen-left, its own right hand), -1 left (a backhand). Its wind-up shows it.
         int cpu_reaction = 0;
+        bool cpu_dash = false;      // diving for a PERFECT serve: it runs twice as fast until it hits
 
         // ---- training with the ball robot (no opponent, no crowd, the basement)
         bool training = false;
@@ -1180,6 +1183,7 @@ namespace
             cpu_target_z = CPU_HOME_Z;
             caught = false;
             ball_hold = 0;
+            cpu_dash = false;
             contact_by_cpu = false;
 
             // Follow / Random flow like a rally: the robot's next ball leaves you where you are, still
@@ -1870,6 +1874,7 @@ namespace
             else
             {
                 // Walk back toward the middle, but after a hard shot it needs a moment first.
+                cpu_dash = false;
                 trail_timer = 0;
                 cpu_target_x = cpu->x / 3;
                 cpu_target_z = CPU_HOME_Z;
@@ -2034,6 +2039,24 @@ namespace
             else
             {
                 plan = PLAN_NORMAL;
+            }
+
+            // A PERFECT topspin serve is very fast: on Easy it's an ace, on Medium the CPU sometimes still gets to it
+            // and on Hard most of the time, but only with a slow, high lob (you can smash that). When it goes for
+            // it, it reads it straight away (no reaction time) and dashes, so it can reach the far corner. (This comes last:
+            // the choice above always ends in an attack or a normal shot.)
+            if(kind == SHOT_SERVE_FAST && serve_quality_of_last == SERVE_PERFECT)
+            {
+                if(sb::rand_range(0, 99) < level->perfect_serve_return)
+                {
+                    plan = PLAN_WEAK;
+                    cpu_reaction = 0;
+                    cpu_dash = true;        // it dives for it: twice as fast, for this one ball
+                }
+                else
+                {
+                    plan = PLAN_ERROR;
+                }
             }
 
             // Where its shot will go (it turns that way before hitting, so you can read it).
@@ -2536,8 +2559,9 @@ namespace
             }
             else if(! cpu->cheering)
             {
-                cpu->x = approach(cpu->x, cpu_target_x, level->speed);
-                cpu->z = approach(cpu->z, cpu_target_z, level->speed);
+                bn::fixed speed = cpu_dash ? level->speed * 2 : level->speed;
+                cpu->x = approach(cpu->x, cpu_target_x, speed);
+                cpu->z = approach(cpu->z, cpu_target_z, speed);
             }
 
             cpu->x = clamp(cpu->x, -CPU_X_LIMIT, CPU_X_LIMIT);
@@ -3107,6 +3131,7 @@ namespace
     constexpr sb::controls_label SERVE_LABELS[] = {
         { sb::KEY_A, "A", "Topspin" }, { 0, "", "fast and flat" },
         { sb::KEY_B, "B", "Backspin" }, { 0, "", "slow and curvy" },
+        { sb::KEY_DPAD, "", "Aim" },
     };
     constexpr sb::controls_label MOVE_LABELS[] = {
         { sb::KEY_DPAD, "", "Move left" }, { 0, "", "and right." },
@@ -3120,7 +3145,8 @@ namespace
         { sb::KEY_START, "Start", "Pause" }, { 0, "", "Change level" }, { 0, "", "How to play" },
     };
     constexpr sb::controls_page CONTROLS_PAGES[] = {
-        { "Serve", SERVE_LABELS, "Hold, then release when the marker is in the red box.", sb::KEY_A | sb::KEY_B },
+        { "Serve", SERVE_LABELS, "Hold, then release when the marker is in the red box.",
+          sb::KEY_A | sb::KEY_B | sb::KEY_DPAD },
         { "Move", MOVE_LABELS, "Your character automatically returns the ball.", sb::KEY_DPAD },
         { "Smash", SMASH_LABELS, "Hold to charge, release to swing as the ball reaches you. Charging slows you down.",
           sb::KEY_A | sb::KEY_B | sb::KEY_DPAD },
@@ -3291,7 +3317,9 @@ namespace
 
                 if(lt >= STANCE)
                 {
+                    // holding A aims right, holding B aims left (you stay put while you hold the button)
                     state.pressed = button;
+                    state.dpad = button == sb::KEY_A ? 1 : -1;
                     bn::fixed mark = bn::fixed(lt - STANCE + 1) * bn::fixed(0.8);
                     bn::fixed f = mark / ZONE;
                     bn::fixed h = 4 + 120 * f * (1 - f);
