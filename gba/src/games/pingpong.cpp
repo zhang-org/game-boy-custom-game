@@ -513,19 +513,36 @@ namespace
         bn::sprite_palettes::set_fade(bn::color(31, 31, 31), intensity);
     }
 
-    // Start during training: 0 = continue, 1 = change drill (back to the menu), 2 = quit to the map.
-    int training_pause()
+    // Start during a match or training: 0 = continue, 1 = change level (back to the menu, on its Level row),
+    // 2 = quit to the map. "How to play" shows the controls pages; A on their last page goes back to the game.
+    int pingpong_pause()
     {
         sb::sfx(bn::sound_items::sfx_select);
-        sb::panel(9, 3, 12, 3);
-        sb::label title;
-        title.set(0, 3 * 8 - 80 + 8 + 4, "Paused", sb::text_color::BLUE, sb::align::CENTER);
-        constexpr bn::string_view items[] = { "Continue", "Change drill", "Quit to map" };
-        int choice = sb::menu(8, 7, items, 0, true);
-        title.clear();
-        sb::panel_clear();
-        sb::update();
-        return choice < 0 ? 0 : choice;
+
+        while(true)
+        {
+            sb::panel(9, 2, 12, 3);
+            sb::label title;
+            title.set(0, 2 * 8 - 80 + 8 + 4, "Paused", sb::text_color::BLUE, sb::align::CENTER);
+            constexpr bn::string_view items[] = { "Continue", "Change level", "How to play", "Quit to map" };
+            int choice = sb::menu(8, 6, items, 0, true);
+            title.clear();
+            sb::panel_clear();
+
+            if(choice == 2)
+            {
+                if(sb::show_controls_pages() == 1)
+                {
+                    sb::update();
+                    return 0;
+                }
+
+                continue;
+            }
+
+            sb::update();
+            return choice < 0 ? 0 : choice == 3 ? 2 : choice;
+        }
     }
 
     // A character with a paddle.
@@ -912,7 +929,7 @@ namespace
         bn::fixed robot_arrive_x = 0;   // where the next ball will reach you (x)
         int follow_offset = 0;
         bool caught = false;        // the ball is in the robot's net
-        bool back_to_menu = false;  // play() ended because "Change drill" was picked in the pause menu
+        bool back_to_menu = false;  // play() ended because "Change level" was picked in the pause menu
         bool target_ready = false;  // the robot has picked where its next ball goes (its head turns there)
         int robot_wait = 1;         // frames in the SERVE state before the robot shoots
         int rally_gap = TRAIN_PAUSE_FRAMES; // how long the POINT state lasts in training
@@ -3038,19 +3055,10 @@ namespace
                 {
                     clear_effects();
                     set_paused_visibility(false);
-                    bool quit;
-
-                    if(training)
-                    {
-                        // Training never ends: the pause menu is the way out (or to another drill).
-                        int choice = training_pause();
-                        back_to_menu = choice == 1;
-                        quit = choice != 0;
-                    }
-                    else
-                    {
-                        quit = sb::game_pause();
-                    }
+                    // (Training never ends: the pause menu is its way out, or to another level or drill.)
+                    int choice = pingpong_pause();
+                    back_to_menu = choice == 1;
+                    bool quit = choice != 0;
 
                     set_paused_visibility(true);
 
@@ -3102,7 +3110,7 @@ namespace
         { sb::KEY_DPAD, "", "Aim wider/closer" },
     };
     constexpr sb::controls_label PAUSE_LABELS[] = {
-        { sb::KEY_START, "Start", "Pause" }, { 0, "", "In training:" }, { 0, "", "change drill" },
+        { sb::KEY_START, "Start", "Pause" }, { 0, "", "Change level" }, { 0, "", "How to play" },
     };
     constexpr sb::controls_page CONTROLS_PAGES[] = {
         { "Serve", SERVE_LABELS, "Hold, then release when the marker is in the red box.", sb::KEY_A | sb::KEY_B },
@@ -3145,11 +3153,15 @@ namespace
             _burst = bn::sprite_items::pingpong_burst.create_sprite(0, 0, 0);
             bn::sprite_ptr* all[] = { &*_body, &*_paddle, &*_ball, &*_shadow, &*_ghost[0], &*_ghost[1], &*_bar[0],
                                       &*_bar[1], &*_zone, &*_mark, &*_meter, &*_burst };
-            const int z[] = { 0, -1, -3, 2, -2, -2, -1, -1, -2, -3, -2, -4 };
+            // Under the page (BG priority 2), so only the part in the Miyoo's screen shows. Only the z orders the
+            // match itself already uses at priority 2 (0 robot / crowd, -1 crowd front row, 2 shadow): the match's
+            // sprites are still there, and Butano only has 16 sort layers in all ("No more sprite sort layers
+            // available" happened with new ones). Body and bars 0, the shadow 2, everything else -1 (in front).
+            const int z[] = { 0, -1, -1, 2, -1, -1, 0, 0, -1, -1, -1, -1 };
 
             for(int i = 0; i < 12; ++i)
             {
-                all[i]->set_bg_priority(2);     // under the page: only the part in the Miyoo's screen shows
+                all[i]->set_bg_priority(2);
                 all[i]->set_z_order(z[i]);
             }
         }
@@ -3832,7 +3844,7 @@ void sb::pingpong_run()
         fade_in();
 
         bool first = true;
-        bool changing_drill = false;
+        bool changing_level = false;
 
         while(true)
         {
@@ -3847,20 +3859,20 @@ void sb::pingpong_run()
                 first = false;
             }
 
-            if(! choose_settings(g, changing_drill))
+            if(! choose_settings(g, changing_level))
             {
                 break;
             }
 
             g.new_match();
-            changing_drill = false;
+            changing_level = false;
 
             if(! g.play())
             {
                 if(g.back_to_menu)
                 {
-                    changing_drill = true;  // the menu opens on the Level row
-                    g.hide_hud();   // "Change drill" in the pause menu: back to the menu
+                    changing_level = true;  // "Change level": the menu opens on the Level row
+                    g.hide_hud();   // "Change level" in the pause menu: back to the menu
                     continue;
                 }
 
