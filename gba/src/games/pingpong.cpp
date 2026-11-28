@@ -54,7 +54,7 @@
 #include "bn_sprite_items_pingpong_burst.h"
 #include "bn_sprite_items_pingpong_flake.h"
 #include "bn_sprite_items_pingpong_light.h"
-#include "bn_sprite_items_pingpong_meter.h"
+#include "bn_sprite_items_pingpong_vmeter.h"
 #include "bn_sprite_items_pingpong_oball.h"
 #include "bn_sprite_items_pingpong_paddle.h"
 #include "bn_sprite_items_pingpong_robot.h"
@@ -106,7 +106,7 @@ namespace
     constexpr bn::fixed FLOOR_FRICTION = 0.7;   // sideways speed kept when bouncing on the floor
     constexpr bn::fixed NET_HEIGHT = 7;         // the ball must be higher than this to cross the net
     constexpr bn::fixed NET_MARGIN = 4;         // planned shots clear the net by at least this much
-    constexpr int SHOT_MIN_FRAMES = 15;         // no shot is ever faster than this
+    constexpr int SHOT_MIN_FRAMES = 12;         // no shot is ever faster than this
     constexpr int SPIN_KICK = 14;               // a spinning ball jumps sideways this many frames' worth of spin when it bounces
 
     // ---- You
@@ -176,7 +176,7 @@ namespace
     constexpr int SERVE_FIRST_FRAMES = 12;      // flight time from the paddle to that first bounce
     constexpr int SERVE_AIM_X = 30;
     // Fast serve (A): flight frames after the first bounce, and CPU power. [weak, ok, strong, perfect]
-    constexpr int SERVE_FAST_FRAMES[4] = { 46, 40, 34, 16 };   // (a perfect one is even faster than a smash)
+    constexpr int SERVE_FAST_FRAMES[4] = { 46, 40, 34, 12 };   // (a perfect one is much faster than a smash)
     constexpr int SERVE_FAST_POWER[4] = { 10, 20, 32, 46 };
     constexpr int SERVE_FAST_DEPTH = -26;
     // Spin serve (B): slower, but curves and kicks sideways after it bounces. [weak, ok, strong, perfect]
@@ -528,13 +528,15 @@ namespace
         int charge_side = 0;    // you, charging: +1 forehand (right), -1 backhand (left)
         bool charge_full = false;
         int charge_pct = 0;     // how full the smash meter is (0..100): the paddle winds up further
+        int windup_t = 0;       // frames it has been winding up
+        bool topspin_jump = true;   // the swing (start_smash) jumps: yes for your smash, no for the CPU's shots
         int windup = 0;         // the CPU about to hit: +1 forehand (ball goes to the right of it on screen),
                                 // -1 backhand (ball goes to its left)
         bn::fixed swing_x, swing_y; // screen spot the swing aims at
         bool cheering = false;
         bool serve_stance = false;  // sideways and bent over, getting ready to serve
         int serve_swing = 0;        // counts down during the serve's own swing
-        int serve_dir = 1;          // you serving: 1 = facing right (left half of the table), -1 = facing left
+        int serve_dir = 1;          // serving: 1 = facing right (from the left half of the table), -1 = facing left
         bool facing_up;
 
         actor(int chr, bool up, bn::fixed start_x, bn::fixed start_z) :
@@ -567,10 +569,22 @@ namespace
             smash = 0;
         }
 
+        // The CPU's shots use the same swing as your smash (without the jump), from the side it wound up on.
+        void start_topspin(bn::fixed ball_x, bn::fixed ball_y_screen, int side)
+        {
+            smash = SMASH_ANIM_FRAMES;
+            swing = 0;
+            topspin_jump = false;
+            paddle_side = side;
+            swing_x = ball_x;
+            swing_y = ball_y_screen;
+        }
+
         void start_smash(bn::fixed ball_x, bn::fixed ball_y_screen)
         {
             smash = SMASH_ANIM_FRAMES;
             swing = 0;
+            topspin_jump = true;
             // Swing from the side it was wound up on (forehand right, backhand left).
             paddle_side = charge_side != 0 ? charge_side : ball_x >= x ? 1 : -1;
             swing_x = ball_x;
@@ -586,7 +600,7 @@ namespace
             if(smash > 0)
             {
                 // A little jump: up for 6 frames, then back down.
-                lift = smash_t < 4 ? smash_t : bn::max(0, 8 - smash_t);
+                lift = ! topspin_jump ? 0 : smash_t < 4 ? smash_t : bn::max(0, 8 - smash_t);
             }
 
             int frame;
@@ -604,7 +618,7 @@ namespace
             else if(serve_stance || serve_swing > 0)
             {
                 frame = sb::FRAME_SIDE;                 // side-on to the table, like a real serve
-                flip = facing_up ? serve_dir < 0 : true;   // (the CPU faces the other way)
+                flip = serve_dir < 0;                   // facing into the table from either side
                 lift = serve_stance ? -2 : 0;           // bent over a little while waiting
             }
             else if(charge_side != 0 || windup != 0)
@@ -705,7 +719,7 @@ namespace
                 // The serve: from low behind the body, brushing up under the ball and forward.
                 --serve_swing;
                 int t = SERVE_SWING_FRAMES - serve_swing;
-                int dir = facing_up ? serve_dir : -1;
+                int dir = serve_dir;
 
                 if(t <= 3)
                 {
@@ -733,7 +747,7 @@ namespace
             else if(serve_stance)
             {
                 // Paddle low and back behind the body.
-                int dir = facing_up ? serve_dir : -1;
+                int dir = serve_dir;
                 pframe = 2;
                 pside = -dir;
                 px = x - 9 * dir;
@@ -753,23 +767,20 @@ namespace
                 px = x + charge_side * (9 + back) + shake;
                 py = cy + 3 + down;
             }
-            else if(windup > 0)
+            else if(windup != 0)
             {
-                // Forehand: paddle pulled far back out to the right.
-                pframe = 1;
-                pside = 1;
-                px = x + 14;
-                py = cy - 3;
-            }
-            else if(windup < 0)
-            {
-                // Backhand: paddle tucked across the body on the left, blade down.
-                pframe = 2;
-                pside = -1;
-                px = x - 9;
-                py = cy + 2;
+                // The CPU about to hit: the same wind-up as your smash, back and down on the side it will hit
+                // from (forehand to its right on screen, backhand to its left).
+                bn::fixed f = bn::min(bn::fixed(windup_t) / 12, bn::fixed(1));
+                bn::fixed back = f < bn::fixed(0.5) ? f * 4 : bn::fixed(2);
+                bn::fixed down = f < bn::fixed(0.5) ? f * 4 : 2 + (f - bn::fixed(0.5)) * 6;
+                pframe = f < bn::fixed(0.5) ? 1 : 3;
+                pside = windup;
+                px = x + windup * (9 + back);
+                py = cy + 3 + down;
             }
 
+            windup_t = windup != 0 ? windup_t + 1 : 0;
             paddle.set_tiles(bn::sprite_items::pingpong_paddle.tiles_item(), pframe);
             paddle.set_horizontal_flip(pside < 0);
             paddle.set_position(px.round_integer(), py.round_integer());
@@ -783,7 +794,7 @@ namespace
         bn::regular_bg_ptr table = bn::regular_bg_items::pingpong_table.create_bg(8, 48);
         bn::sprite_ptr ball_sprite = bn::sprite_items::pingpong_ball.create_sprite(0, 0, 1);
         bn::sprite_ptr shadow_sprite = bn::sprite_items::pingpong_shadow.create_sprite(0, 0, 0);
-        bn::sprite_ptr meter = bn::sprite_items::pingpong_meter.create_sprite(0, 0, 0);
+        bn::sprite_ptr meter = bn::sprite_items::pingpong_vmeter.create_sprite(0, 0, 0);
         bn::sprite_ptr burst = bn::sprite_items::pingpong_burst.create_sprite(0, 0, 0);
         bn::sprite_ptr serve_bar = bn::sprite_items::pingpong_vbar.create_sprite(0, 0, 0);
         bn::sprite_ptr serve_bar_top = bn::sprite_items::pingpong_vbar.create_sprite(0, 0, 1);
@@ -1147,6 +1158,7 @@ namespace
             if(server == CPU)
             {
                 cpu_target_x = sb::rand_range(0, 1) ? CPU_SERVE_CORNER_X : -CPU_SERVE_CORNER_X;
+                cpu->serve_dir = cpu_target_x > 0 ? -1 : 1;     // from its corner it faces into the table
                 bn::string<32> text(sb::character_name(opponent));
                 text.append(" serves");
                 show_message(text, sb::text_color::WHITE, 70);
@@ -1175,7 +1187,7 @@ namespace
             }
             else
             {
-                ball = { cpu->x - 9, cpu->z + 2, 2, 0, 0, 0, 0 };
+                ball = { cpu->x + 9 * cpu->serve_dir, cpu->z + 2, 2, 0, 0, 0, 0 };
             }
         }
 
@@ -1679,7 +1691,7 @@ namespace
         void cpu_hit()
         {
             int speedup = bn::min(rally_hits / RALLY_HITS_PER_SPEEDUP, RALLY_SPEEDUP_MAX);
-            cpu->start_swing(ball.x, ball_screen_y());
+            cpu->start_topspin(ball.x, ball_screen_y(), cpu->windup != 0 ? cpu->windup : ball.x >= cpu->x ? 1 : -1);
             cpu->windup = 0;
             ball.spin = 0;
             shot_kind kind = SHOT_CPU_NORMAL;
@@ -2311,6 +2323,12 @@ namespace
                 serve_quality_of_last = miss <= level->serve_perfect ? SERVE_PERFECT :
                                         miss <= level->serve_strong ? SERVE_GOOD :
                                         miss <= level->serve_ok ? SERVE_OK : SERVE_WEAK;
+
+                if(serve_quality_of_last != SERVE_PERFECT)
+                {
+                    // Let go below the red box = early, above it = late.
+                    show_timing_hint(serve_mark < serve_zone_pos ? "Early" : "Late");
+                }
                 hide_serve_bar();
                 hint_label.clear();
                 player_serve(serve_quality_of_last);    // hit the ball right where it is in the toss
@@ -2625,14 +2643,15 @@ namespace
                 robot.set_tiles(bn::sprite_items::pingpong_robot.tiles_item(), robot_frame());
             }
 
-            // The power meter floats above your head while you charge.
+            // The power meter stands beside you while you charge, on the paddle's side (right for a forehand,
+            // left for a backhand), so it never hides the ball.
             meter.set_visible(charging);
 
             if(charging)
             {
                 int f = bn::min(charge * 8 / level->charge_frames, 8);
-                meter.set_tiles(bn::sprite_items::pingpong_meter.tiles_item(), f);
-                meter.set_position(me->x.round_integer(), me->center_y() - 22);
+                meter.set_tiles(bn::sprite_items::pingpong_vmeter.tiles_item(), f);
+                meter.set_position((me->x + me->charge_side * 21).round_integer(), me->center_y() - 2);
             }
         }
 

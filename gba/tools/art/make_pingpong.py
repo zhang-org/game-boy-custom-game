@@ -612,6 +612,25 @@ def make_meter():
     return c
 
 
+def make_vmeter():
+    """The smash meter, standing up beside the paddle while you charge: 8x32, 9 frames (empty .. full),
+    filling from the bottom. The top quarter is gold: release there (with good timing) for a PERFECT shot."""
+    out_, back, green, gold, red, white = METER_PALETTE[:6]
+    c = Canvas(8, 32 * 9)
+    for f in range(9):
+        y0 = f * 32
+        c.rect(1, y0, 6, 32, out_)
+        c.rect(2, y0 + 1, 4, 30, back)
+        fill = round(30 * f / 8)
+        for i in range(fill):
+            col = green if i < 22 else gold
+            c.rect(2, y0 + 30 - i, 4, 1, col)
+        c.hline(2, 5, y0 + 30 - 22, white)          # where "perfect" starts
+        if f == 8:
+            c.vline(2, y0 + 1, y0 + 30, white)
+    return c
+
+
 def make_burst():
     """A star burst at the ball for a perfect hit: 16x16, 2 frames (big, fading)."""
     out_, back, green, gold, red, white, pink = METER_PALETTE
@@ -715,6 +734,7 @@ def main():
         save_sprite(name, canvas, h, shared)
     # The meter and the burst share one palette, so together they use one of the 16 sprite palettes.
     save_sprite("pingpong_meter", make_meter(), 8, METER_PALETTE)
+    save_sprite("pingpong_vmeter", make_vmeter(), 32, METER_PALETTE)
     save_sprite("pingpong_burst", make_burst(), 16, METER_PALETTE)
     save_sprite("pingpong_vbar", make_serve_bar(), 32, METER_PALETTE)
     save_sprite("pingpong_vzone", make_serve_zones(), 32, METER_PALETTE)
