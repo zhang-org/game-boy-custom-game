@@ -19,7 +19,11 @@ foreach ($dir in Get-ChildItem src -Directory | Where-Object Name -ne 'common') 
     $name  = $dir.Name
     $title = $name.ToUpper()
     if ($title.Length -gt 15) { $title = $title.Substring(0, 15) }
-    & $lcc -Wm-yc "-Wm-yn$title" -o "build\$name.gbc" "src\$name\main.c"
+    # Optional extra compiler flags for one game (e.g. a cartridge with battery save): src\<game>\lcc_flags.txt
+    $extra = @()
+    $flagsFile = "src\$name\lcc_flags.txt"
+    if (Test-Path $flagsFile) { $extra = (Get-Content $flagsFile -Raw).Trim() -split '\s+' }
+    & $lcc -Wm-yc "-Wm-yn$title" @extra -o "build\$name.gbc" "src\$name\main.c"
     if ($LASTEXITCODE -ne 0) { Write-Host "BUILD FAILED: $name" -ForegroundColor Red; $failed = $true }
     else { Write-Host "Built build\$name.gbc" -ForegroundColor Green }
 }

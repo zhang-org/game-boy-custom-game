@@ -20,7 +20,11 @@ for dir in src/*/; do
   name=$(basename "$dir")
   [ "$name" = "common" ] && continue
   title=$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]' | cut -c1-15)
-  if "$lcc" -Wm-yc "-Wm-yn$title" -o "build/$name.gbc" "src/$name/main.c"; then
+  # Optional extra compiler flags for one game (e.g. a cartridge with battery save): src/<game>/lcc_flags.txt
+  extra=""
+  [ -f "src/$name/lcc_flags.txt" ] && extra=$(tr -d '\r' < "src/$name/lcc_flags.txt")
+  # shellcheck disable=SC2086
+  if "$lcc" -Wm-yc "-Wm-yn$title" $extra -o "build/$name.gbc" "src/$name/main.c"; then
     echo "Built build/$name.gbc"
   else
     echo "BUILD FAILED: $name"; failed=1
