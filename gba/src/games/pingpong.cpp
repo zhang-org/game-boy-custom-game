@@ -52,6 +52,7 @@
 #include "bn_sound_items.h"
 #include "bn_sprite_items_pingpong_ball.h"
 #include "bn_sprite_items_pingpong_burst.h"
+#include "bn_sprite_items_pingpong_digits.h"
 #include "bn_sprite_items_pingpong_flake.h"
 #include "bn_sprite_items_pingpong_light.h"
 #include "bn_sprite_items_pingpong_vmeter.h"
@@ -93,10 +94,11 @@ namespace
     constexpr int SERVE_SWITCH_EVERY = 2;       // the serve changes sides every this many points (every point at deuce)
     // Records: the best result for each difficulty (any win beats any loss, then the bigger margin).
 
-    // ---- The scoreboard (must match draw_scoreboard() in tools/art/make_pingpong.py)
-    constexpr int SCOREBOARD_YOU_X = 16 - 120;  // centre of the left card (your score), Butano coordinates
-    constexpr int SCOREBOARD_CPU_X = 35 - 120;  // centre of the right card
-    constexpr int SCOREBOARD_Y = 119 - 80;
+    // ---- The flip scoreboard on its candy-cane table (must match draw_scoreboard() in tools/art/make_pingpong.py):
+    // four cards, your tens and units then theirs. The numbers are pingpong_digits sprites (frames 0-9 red for
+    // you, 10-19 green for them), 8x16 with the number in the top-left corner, one pixel in from the card's edge.
+    constexpr int SCORE_CARD_X[4] = { 4, 14, 27, 37 };     // left edge of each card (screen pixels)
+    constexpr int SCORE_DIGIT_Y = 106 + 8 - 80;            // sprite centre y, Butano coordinates
     constexpr int NAME_BOARD_WIDTH = 96;        // the names board at the top is this wide (pixels)
 
     // ---- Ball physics (pixels and frames)
@@ -825,7 +827,7 @@ namespace
         bn::sprite_ptr serve_zone = bn::sprite_items::pingpong_vzone.create_sprite(0, 0, 0);
         bn::sprite_ptr serve_marker = bn::sprite_items::pingpong_vmark.create_sprite(0, 0, 0);
         bn::sprite_ptr robot = bn::sprite_items::pingpong_robot.create_sprite(ROBOT_HEAD_X, ROBOT_HEAD_Y, 2);
-        sb::label my_score_label, cpu_score_label;
+        bn::vector<bn::sprite_ptr, 4> score_cards;     // the numbers on the flip scoreboard
         sb::label timing_label;
         int timing_timer = 0;
         struct spectator
@@ -918,6 +920,15 @@ namespace
         match()
         {
             robot.set_bg_priority(2);
+
+            for(int i = 0; i < 4; ++i)
+            {
+                bn::sprite_ptr d = bn::sprite_items::pingpong_digits.create_sprite(score_card_x(i), SCORE_DIGIT_Y,
+                                                                                  i < 2 ? 0 : 10);
+                d.set_bg_priority(3);
+                score_cards.push_back(d);
+            }
+
             robot.set_z_order(0);
 
             hall.set_priority(3);
@@ -1044,6 +1055,7 @@ namespace
             cheer_timer = 0;
             my_points = 0;
             cpu_points = 0;
+            update_score_cards();
             last_winner = PLAYER;
             message_label.clear();
             hint_label.clear();
@@ -1069,6 +1081,11 @@ namespace
             }
 
             robot.set_visible(basement);
+
+            for(bn::sprite_ptr& d : score_cards)
+            {
+                d.set_visible(! basement);      // (the scoreboard is in the hall)
+            }
 
             // The robot's balls are orange, like the ones in its hopper.
             ball_item = basement ? &bn::sprite_items::pingpong_oball : &bn::sprite_items::pingpong_ball;
@@ -1386,10 +1403,25 @@ namespace
             }
 
             score_label.set(0, -71, text, sb::text_color::WHITE, sb::align::CENTER);
-            my_score_label.set(SCOREBOARD_YOU_X, SCOREBOARD_Y, sb::to_text(my_points), sb::text_color::DARK,
-                               sb::align::CENTER);
-            cpu_score_label.set(SCOREBOARD_CPU_X, SCOREBOARD_Y, sb::to_text(cpu_points), sb::text_color::DARK,
-                                sb::align::CENTER);
+            update_score_cards();
+        }
+
+        static int score_card_x(int card)
+        {
+            return SCORE_CARD_X[card] + 1 + 4 - 120;
+        }
+
+        // Flips the scoreboard cards to the score: "03 02" (red for you, green for them).
+        void update_score_cards()
+        {
+            int mine = bn::min(my_points, 99);
+            int theirs = bn::min(cpu_points, 99);
+            const int digits[4] = { mine / 10, mine % 10, 10 + theirs / 10, 10 + theirs % 10 };
+
+            for(int i = 0; i < 4; ++i)
+            {
+                score_cards[i].set_tiles(bn::sprite_items::pingpong_digits.tiles_item(), digits[i]);
+            }
         }
 
         void show_message(const bn::string_view& text, sb::text_color color, int frames)
@@ -1402,8 +1434,6 @@ namespace
         {
             hide_serve_bar();
             score_label.clear();
-            my_score_label.clear();
-            cpu_score_label.clear();
             timing_label.clear();
             timing_timer = 0;
             message_label.clear();
@@ -2850,6 +2880,11 @@ namespace
             table.set_position(8 + dx, 48 + dy);
             robot.set_position(ROBOT_HEAD_X + dx, ROBOT_HEAD_Y + dy);
 
+            for(int i = 0; i < score_cards.size(); ++i)
+            {
+                score_cards[i].set_position(score_card_x(i) + dx, SCORE_DIGIT_Y + dy);
+            }
+
             if(flash > 0)
             {
                 set_white_flash(flash);
@@ -2923,8 +2958,6 @@ namespace
             hint_label.set_visible(visible);
             score_label.set_visible(visible);
             timing_label.set_visible(visible);
-            my_score_label.set_visible(visible);
-            cpu_score_label.set_visible(visible);
         }
 
         // Plays one match. Returns false if the player quit from the pause menu.
