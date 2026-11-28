@@ -298,9 +298,13 @@ namespace sb
                 redraw = false;
                 t = 0;
                 bool last = page == pages.size() - 1;
-                const char* hint = intro ? (last ? "A: Play  B: Map" : "A: Next  B: Map") :
-                                           (last ? "A: Play  B: Back" : "A: Next  B: Back");
-                view.show(pages[page], page, pages.size(), hint);
+                // B goes back a page, or out from the first one
+                const char* a_hint = last ? "A: Play" : "A: Next";
+                const char* b_hint = page > 0 ? "B: Back" : intro ? "B: Map" : "B: Menu";
+                bn::string<24> hint(a_hint);
+                hint.append("  ");
+                hint.append(b_hint);
+                view.show(pages[page], page, pages.size(), hint.c_str());
             }
 
             view.press(animation.frame(page, t));
@@ -338,7 +342,14 @@ namespace sb
             else if(bn::keypad::b_pressed())
             {
                 sfx(bn::sound_items::sfx_back);
-                break;
+
+                if(page == 0)
+                {
+                    break;
+                }
+
+                --page;
+                redraw = true;
             }
         }
 

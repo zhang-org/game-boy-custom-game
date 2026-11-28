@@ -5,6 +5,7 @@
 // labels and a tip. Left / Right flips the pages.
 //
 //   * A goes to the next page; on the last page it goes on to the game. Start goes straight to the game.
+//     B goes back a page; on the first page it leaves (to the map, or back to the pause menu).
 //   * Before playing: game_intro_pages() shows them the first time a game is played (B goes back to the map),
 //     and skips them after that.
 //   * In the pause menu, "How to play" shows the same pages once a game has registered them with
@@ -87,8 +88,8 @@ namespace sb
         virtual void close() = 0;
     };
 
-    // Shows the pages. Returns true to go on to the game (A on the last page, or Start), false for B (back to
-    // the map with `intro`, back to the pause menu without).
+    // Shows the pages. Returns true to go on to the game (A on the last page, or Start), false for B on the
+    // first page (back to the map with `intro`, back to the pause menu without).
     bool controls_pages(bn::span<const controls_page> pages, controls_animation& animation, bool intro);
 
     // The start screen of a game with controls pages (instead of game_intro()): shows them the first time the
