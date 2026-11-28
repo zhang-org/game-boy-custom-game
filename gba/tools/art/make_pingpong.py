@@ -343,36 +343,90 @@ def draw_tree(c):
 
 # The flip scoreboard in the bottom-left corner. The game writes the two scores on its white cards
 # (centres at screen x=16 and x=35, y=118: keep SCOREBOARD_* in pingpong.cpp in sync).
+# ---- the scoreboard: a real table tennis flip board (two cards per player: tens and units) standing on a
+# little table whose top is a red candy-cane board. The cards are blank here; the game puts the numbers on them
+# with the pingpong_digits sprites (SCORE_CARD_X / SCORE_DIGIT_Y in src/games/pingpong.cpp must match).
+SB_X0, SB_Y0 = 3, 104                       # top-left of the first card's outline area
+SCORE_CARDS_X = (SB_X0 + 1, SB_X0 + 11, SB_X0 + 24, SB_X0 + 34)   # left edge of each card
+SCORE_DIGIT_DX, SCORE_DIGIT_DY = 1, 2       # where the 7x11 number sits on its card
+SB_RED = rgb("#d82828")
+SB_RED_DARK = rgb("#901818")
+SB_GREEN = rgb("#289048")
+SB_CARD = rgb("#f8f8f8")
+SB_CARD_SHADE = rgb("#d0d0d8")
+SB_RING = rgb("#c8d0d8")
+SB_RING_DARK = rgb("#808890")
+
+# Big bold numbers, 7 wide x 11 tall.
+SCORE_DIGITS = {
+    "0": [".#####.", "#######", "##...##", "##...##", "##...##", "##...##", "##...##", "##...##", "##...##", "#######", ".#####."],
+    "1": ["...##..", "..###..", ".####..", "...##..", "...##..", "...##..", "...##..", "...##..", "...##..", ".######", ".######"],
+    "2": [".#####.", "#######", ".....##", ".....##", "....###", "...###.", "..###..", ".###...", "###....", "#######", "#######"],
+    "3": [".#####.", "#######", ".....##", ".....##", "..#####", "..#####", ".....##", ".....##", ".....##", "#######", ".#####."],
+    "4": ["....##.", "...###.", "..####.", ".#####.", "###.##.", "##..##.", "#######", "#######", "....##.", "....##.", "....##."],
+    "5": ["#######", "#######", "##.....", "##.....", "######.", "#######", ".....##", ".....##", ".....##", "#######", ".#####."],
+    "6": [".#####.", "#######", "##.....", "##.....", "######.", "#######", "##...##", "##...##", "##...##", "#######", ".#####."],
+    "7": ["#######", "#######", ".....##", "....###", "....##.", "...###.", "...##..", "..###..", "..##...", "..##...", "..##..."],
+    "8": [".#####.", "#######", "##...##", "##...##", ".#####.", "#######", "##...##", "##...##", "##...##", "#######", ".#####."],
+    "9": [".#####.", "#######", "##...##", "##...##", "##...##", "#######", ".######", ".....##", ".....##", "#######", ".#####."],
+}
+
+
+def draw_score_card(c, x, y):
+    w, h = 9, 15
+    c.rect(x, y, w, h, SB_CARD)
+    c.hline(x, x + w - 1, y + h - 1, SB_CARD_SHADE)
+    c.vline(x + w - 1, y, y + h - 1, SB_CARD_SHADE)
+    c.hline(x - 1, x + w, y - 1, OUTLINE)
+    c.hline(x - 1, x + w, y + h, OUTLINE)
+    c.vline(x - 1, y - 1, y + h, OUTLINE)
+    c.vline(x + w, y - 1, y + h, OUTLINE)
+    for rx in (x + 2, x + w - 3):           # binder rings over the top edge
+        c.set(rx, y - 3, SB_RING)
+        c.set(rx - 1, y - 2, SB_RING)
+        c.set(rx + 1, y - 2, SB_RING_DARK)
+        c.set(rx, y - 1, SB_RING)
+        c.set(rx, y, SB_RING_DARK)
+
+
 def draw_scoreboard(c):
-    x0, y0, w, h = 6, 106, 40, 26
-    # legs
-    for lx in (x0 + 4, x0 + w - 6):
-        c.rect(lx, y0 + h, 2, 8, WAIN_DARK)
-        c.vline(lx - 1, y0 + h, y0 + h + 7, OUTLINE)
-        c.vline(lx + 2, y0 + h, y0 + h + 7, OUTLINE)
-    # wooden frame
-    c.rect(x0, y0, w, h, WAIN)
-    c.hline(x0, x0 + w - 1, y0, WAIN_LIGHT)
-    c.hline(x0, x0 + w - 1, y0 + h - 1, WAIN_DARK)
-    c.vline(x0 - 1, y0 - 1, y0 + h, OUTLINE)
-    c.vline(x0 + w, y0 - 1, y0 + h, OUTLINE)
-    c.hline(x0 - 1, x0 + w, y0 - 1, OUTLINE)
-    c.hline(x0 - 1, x0 + w, y0 + h, OUTLINE)
-    # two white flip cards with a hinge ring on top and a fold line across the middle
-    for cx in (x0 + 3, x0 + 22):
-        c.rect(cx, y0 + 4, 15, 19, WHITE)
-        c.hline(cx, cx + 14, y0 + 13, SNOW_SHADE)
-        c.vline(cx - 1, y0 + 4, y0 + 22, OUTLINE)
-        c.vline(cx + 15, y0 + 4, y0 + 22, OUTLINE)
-        c.hline(cx - 1, cx + 15, y0 + 23, OUTLINE)
-        c.hline(cx - 1, cx + 15, y0 + 3, OUTLINE)
-        for rx in (cx + 3, cx + 11):
-            c.rect(rx, y0 + 1, 2, 3, PLAQUE_DARK)
-    # little colour tabs: green = you (left card), red = them (right card)
-    c.rect(x0 + 3, y0 + h - 3, 15, 2, GREEN)
-    c.rect(x0 + 22, y0 + h - 3, 15, 2, RED)
-    # shadow on the floor
-    c.hline(x0, x0 + w + 1, y0 + h + 8, FLOOR_SEAM)
+    x0, y0 = SB_X0, SB_Y0
+    top0, top1 = y0 + 11, y0 + 21           # the tabletop, back edge .. front edge (wider at the front)
+    for i, y in enumerate(range(top0, top1 + 1)):
+        l = x0 - 1 - i // 4
+        r = x0 + 45 + i // 4
+        c.hline(l, r, y, SB_RED)
+        for ex in (l, l + 1, r - 1, r):     # candy-cane trim down both sides
+            c.set(ex, y, SB_CARD if (y // 2) % 2 == 0 else SB_RED)
+        c.set(l - 1, y, OUTLINE)
+        c.set(r + 1, y, OUTLINE)
+    lb, rb = x0 - 1 - 10 // 4, x0 + 45 + 10 // 4
+    c.hline(x0 - 1, x0 + 45, top0 - 1, OUTLINE)
+    for x in range(lb, rb + 1):             # a candy-cane stripe along the front edge ...
+        c.set(x, top1, SB_CARD if (x // 3) % 2 == 0 else SB_RED)
+    c.rect(lb, top1 + 1, rb - lb + 1, 3, SB_RED_DARK)   # ... and the darker front face
+    c.hline(lb - 1, rb + 1, top1 + 4, OUTLINE)
+    c.vline(lb - 1, top1, top1 + 4, OUTLINE)
+    c.vline(rb + 1, top1, top1 + 4, OUTLINE)
+    for lx in (lb + 1, rb - 3):             # only the front legs show: candy canes
+        for y in range(top1 + 5, top1 + 15):
+            c.hline(lx, lx + 2, y, SB_CARD if (y // 2) % 2 == 0 else SB_RED)
+        c.vline(lx - 1, top1 + 5, top1 + 15, OUTLINE)
+        c.vline(lx + 3, top1 + 5, top1 + 15, OUTLINE)
+        c.hline(lx - 1, lx + 3, top1 + 15, OUTLINE)
+    c.hline(lb, rb + 1, top1 + 16, FLOOR_SEAM)      # its shadow on the floor
+    for cx in SCORE_CARDS_X:                # the four cards, standing on the back of the tabletop
+        draw_score_card(c, cx, y0)
+
+
+def make_digits():
+    """pingpong_digits: 8x16, 20 frames: 0-9 in red (your score), then 0-9 in green (the opponent's).
+    The number is drawn at the top-left of each frame (7x11)."""
+    c = Canvas(8, 16 * 20)
+    for f in range(20):
+        ink = SB_RED if f < 10 else SB_GREEN
+        c.ascii(0, f * 16, SCORE_DIGITS[str(f % 10)], {"#": ink})
+    return c
 
 
 def draw_hall():
@@ -735,6 +789,7 @@ def main():
     # The meter and the burst share one palette, so together they use one of the 16 sprite palettes.
     save_sprite("pingpong_meter", make_meter(), 8, METER_PALETTE)
     save_sprite("pingpong_vmeter", make_vmeter(), 32, METER_PALETTE)
+    save_sprite("pingpong_digits", make_digits(), 16)
     save_sprite("pingpong_burst", make_burst(), 16, METER_PALETTE)
     save_sprite("pingpong_vbar", make_serve_bar(), 32, METER_PALETTE)
     save_sprite("pingpong_vzone", make_serve_zones(), 32, METER_PALETTE)
