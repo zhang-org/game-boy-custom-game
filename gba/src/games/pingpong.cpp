@@ -1,4 +1,4 @@
-// Ping Pong Pals: table tennis against a CPU family member.
+// Ping Pong Pals: table tennis against a CPU opponent (one of the other characters).
 //
 // Seen from a 3/4 top-down angle: you stand at the bottom (seen from behind), the CPU at the top.
 // The ball lives in 3D world coordinates:
@@ -23,7 +23,13 @@
 //     get attacked, hard ones often get a slow high floater back (smash it!), very hard ones make it
 //     miss. Before it hits, it turns its body to the side it will hit to: watch it.
 //
-// Art: tools/art/make_pingpong.py -> graphics/pingpong/. Sounds: tools/music/sfx_pingpong.py.
+// Training (pick it in the menu before a match) happens in the basement with a ball robot instead of
+// an opponent. Serve practice: serve into the robot's net. Follow: the robot shoots every ball at you,
+// so you only practise the timing of your swing. Random: it shoots all over the table, and turns its
+// head just before, so you can see where the ball will go. It never ends: Start to change or quit.
+//
+// Art: tools/art/make_pingpong.py and make_pingpong_basement.py -> graphics/pingpong/.
+// Sounds: tools/music/sfx_pingpong.py.
 #include "bn_bg_palettes.h"
 #include "bn_color.h"
 #include "bn_fixed.h"
@@ -39,6 +45,8 @@
 #include "bn_vector.h"
 
 #include "bn_music_items.h"
+#include "bn_regular_bg_items_pingpong_basement.h"
+#include "bn_regular_bg_items_pingpong_btable.h"
 #include "bn_regular_bg_items_pingpong_hall.h"
 #include "bn_regular_bg_items_pingpong_table.h"
 #include "bn_sound_items.h"
@@ -46,8 +54,10 @@
 #include "bn_sprite_items_pingpong_burst.h"
 #include "bn_sprite_items_pingpong_flake.h"
 #include "bn_sprite_items_pingpong_light.h"
-#include "bn_sprite_items_pingpong_meter.h"
+#include "bn_sprite_items_pingpong_vmeter.h"
+#include "bn_sprite_items_pingpong_oball.h"
 #include "bn_sprite_items_pingpong_paddle.h"
+#include "bn_sprite_items_pingpong_robot.h"
 #include "bn_sprite_items_pingpong_shadow.h"
 #include "bn_sprite_items_pingpong_vbar.h"
 #include "bn_sprite_items_pingpong_vmark.h"
@@ -96,7 +106,7 @@ namespace
     constexpr bn::fixed FLOOR_FRICTION = 0.7;   // sideways speed kept when bouncing on the floor
     constexpr bn::fixed NET_HEIGHT = 7;         // the ball must be higher than this to cross the net
     constexpr bn::fixed NET_MARGIN = 4;         // planned shots clear the net by at least this much
-    constexpr int SHOT_MIN_FRAMES = 18;         // no shot is ever faster than this
+    constexpr int SHOT_MIN_FRAMES = 16;         // no shot is ever faster than this
     constexpr int SPIN_KICK = 14;               // a spinning ball jumps sideways this many frames' worth of spin when it bounces
 
     // ---- You
@@ -166,7 +176,14 @@ namespace
     constexpr int SERVE_FIRST_FRAMES = 12;      // flight time from the paddle to that first bounce
     constexpr int SERVE_AIM_X = 30;
     // Fast serve (A): flight frames after the first bounce, and CPU power. [weak, ok, strong, perfect]
-    constexpr int SERVE_FAST_FRAMES[4] = { 46, 40, 34, 28 };
+    constexpr int SERVE_FAST_FRAMES[4] = { 46, 40, 34, 18 };
+    // A plain ball starting low off your side must arc up to clear the net, so plan_shot stretches any fast
+    // serve to about 34 frames. A PERFECT topspin serve instead dips (extra pull down while it flies), so it
+    // can be fast and still clear the net. Its first hop onto your side is quick too (SERVE_PERFECT_HOP_FRAMES,
+    // not held back by SHOT_MIN_FRAMES), so it keeps one steady speed, about 2.3-2.4 px/frame the whole way:
+    // a little under a PERFECT smash (2.7) and about twice a strong serve.
+    constexpr bn::fixed SERVE_TOPSPIN_DIP = 0.2;
+    constexpr int SERVE_PERFECT_HOP_FRAMES = 10;
     constexpr int SERVE_FAST_POWER[4] = { 10, 20, 32, 46 };
     constexpr int SERVE_FAST_DEPTH = -26;
     // Spin serve (B): slower, but curves and kicks sideways after it bounces. [weak, ok, strong, perfect]
@@ -211,7 +228,41 @@ namespace
         { "Hard",   1.3,  8,    28,    72,  24,   102, 16,  46,    34,    44,   45,   24,    6,    1,    1.05, 1,   5,  10,  85,  20,    45, 40 },
     };
 
-    constexpr int CPU_RUN_WEIGHT = 60;          // difficulty = power + run * this, run = 1 when it only just makes it
+    // ---- Training with the ball robot (same Easy / Medium / Hard choice as a match)
+    struct train_level
+    {
+        const char* name;
+        int feed_frames;            // the robot's ball: flight time to its bounce on your side (lower = faster)
+        int feed_gap;               // after your ball lands in its net, the robot shoots the next one this much later
+        int miss_gap;               // ... and this much later after a miss
+        bn::fixed sweet_front;      // a PERFECT smash needs the ball between this far in front of you ...
+        bn::fixed sweet_back;       // ... and this far behind you when you let go
+        int charge_frames;          // frames to fill the smash meter
+    };
+
+    constexpr train_level TRAIN_LEVELS[3] = {
+        //  name      feed gap  miss  front back charge
+        { "Easy",     64,  30,  60,   12,   4,   30 },
+        { "Medium",   52,  22,  50,   8,    2,   24 },
+        { "Hard",     34,  6,   34,   5,    1,   20 },
+    };
+
+    constexpr int TRAIN_PAUSE_FRAMES = 40;      // serve practice: pause after each serve
+    constexpr int ROBOT_FIRST_WAIT = 60;        // the robot's first ball comes this long after you start
+    constexpr int FOLLOW_SPREAD = 6;            // Follow: the ball arrives up to this far to either side of you
+    constexpr int RANDOM_SPREAD = 48;           // Random: the ball arrives anywhere up to this far from the middle
+    constexpr bn::fixed ROBOT_TURN_SPEED = 0.2; // head frames per frame while it turns
+    // The robot's catch net, in ball coordinates: a back wall just past the far end of the table, side walls
+    // along the far half of the table, up to NET_TOP_H high (see draw_robot() in the art script).
+    constexpr int CATCH_BEYOND = 3;             // the back of the net is this far past the far end of the table
+    constexpr bn::fixed NET_SIDE_X = 48;        // the side nets ...
+    constexpr bn::fixed NET_SIDE_FROM_Z = -21;  // ... run from here to the back
+    constexpr bn::fixed NET_TOP_H = 20;         // a ball higher than this stops at the top of the net and drops in
+    constexpr bn::fixed NET_REST_H = -3;        // a caught ball ends up in the tray at this height
+
+    enum drill_kind { DRILL_SERVE = 0, DRILL_FOLLOW = 1, DRILL_RANDOM = 2 };
+
+    constexpr int CPU_RUN_WEIGHT = 60;         // difficulty = power + run * this, run = 1 when it only just makes it
     constexpr int CPU_JITTER = 8;               // small random wobble so it isn't robotic
     constexpr int CPU_SERVE_DELAY = 70;         // frames before the CPU serves
     // After returning a hard shot the CPU is off balance: it waits this long before walking back to the
@@ -231,7 +282,8 @@ namespace
     constexpr int POINT_PAUSE_FRAMES = 80;      // pause after a point
     constexpr int MATCH_END_FRAMES = 110;       // the winner cheers this long before the result box
     constexpr int SWING_FRAMES = 12;            // length of the normal swing animation
-    constexpr int SMASH_ANIM_FRAMES = 16;       // length of the jumping smash animation
+    constexpr int SMASH_ANIM_FRAMES = 12;       // length of the jumping smash animation
+    constexpr int SMASH_CONTACT_FRAMES = 2;     // the paddle meets the ball this long after you let go
     constexpr int PERFECT_FREEZE_FRAMES = 7;    // hit-stop on a PERFECT shot
     constexpr int PERFECT_SHAKE_FRAMES = 14;    // screen shake after it
     constexpr bn::fixed PERFECT_FLASH = 0.6;    // white flash strength (fades out)
@@ -262,6 +314,13 @@ namespace
     constexpr bn::fixed CPU_Z_MAX = -40;
     constexpr bn::fixed CPU_HOME_Z = -45;
     constexpr bn::fixed HIT_MIN_H = -7;         // balls lower than this (below the table top) can't be hit
+
+    // The ball robot (must match HEAD_X / HEAD_Y in tools/art/make_pingpong_basement.py: its head is drawn
+    // centred on screen pixel (119, 28), one pixel above the middle of its 32x32 sprite).
+    constexpr int ROBOT_HEAD_X = 119 - 120;     // sprite centre, Butano coordinates
+    constexpr int ROBOT_HEAD_Y = 28 + 1 - 80;
+    constexpr bn::fixed ROBOT_MOUTH_Z = -39;    // the ball leaves its mouth here (2 px below the head's centre)
+    constexpr bn::fixed ROBOT_MOUTH_H = 16;
 
     enum side { PLAYER = 0, CPU = 1 };
 
@@ -305,10 +364,14 @@ namespace
     {
         bn::fixed x, z, h, vx, vz, vh;
         bn::fixed spin;     // sideways push added to vx every frame
+        bn::fixed dip = 0;  // extra pull down every frame (heavy topspin), gone after the next bounce
     };
 
-    // The difficulty picked last time (index into LEVELS).
+    // What was picked last time in the menu: the difficulty (index into LEVELS / TRAIN_LEVELS), match or
+    // training, and the drill.
     int g_level_choice = 1;
+    bool g_training = false;
+    int g_drill_choice = DRILL_FOLLOW;
 
     bool over_table(bn::fixed x, bn::fixed z)
     {
@@ -322,7 +385,7 @@ namespace
         b.vx += b.spin;
         b.x += b.vx;
         b.z += b.vz;
-        b.vh -= GRAVITY;
+        b.vh -= GRAVITY + b.dip;
         b.h += b.vh;
 
         // The net: crossing z = 0 too low.
@@ -348,6 +411,7 @@ namespace
             if(over_table(b.x, b.z) && b.h <= 0 && b.h - b.vh > -3)
             {
                 b.h = 0;
+                b.dip = 0;
                 b.vh = -b.vh * TABLE_BOUNCE;
 
                 // Spin makes the ball jump sideways off the table, then it fades.
@@ -367,6 +431,7 @@ namespace
             if(b.h <= -TABLE_HEIGHT)
             {
                 b.h = -TABLE_HEIGHT;
+                b.dip = 0;
                 b.vh = -b.vh * FLOOR_BOUNCE;
                 b.vx = b.vx * FLOOR_FRICTION;
                 b.vz = b.vz * FLOOR_FRICTION;
@@ -385,22 +450,23 @@ namespace
     }
 
     // Height after t frames of flight (matches step_ball exactly while nothing is touched).
-    bn::fixed height_after(bn::fixed h0, bn::fixed vh0, int t)
+    bn::fixed height_after(bn::fixed h0, bn::fixed vh0, int t, bn::fixed gravity)
     {
-        return h0 + vh0 * t - GRAVITY * (t * (t + 1) / 2);
+        return h0 + vh0 * t - gravity * (t * (t + 1) / 2);
     }
 
     // Aims the ball at (tx, tz) on the table, landing after `frames` frames (allowing for b.spin).
     // Lengthens the flight (a higher, slower arc) until the ball clears the net.
-    void plan_shot(ball_state& b, bn::fixed tx, bn::fixed tz, int frames)
+    void plan_shot(ball_state& b, bn::fixed tx, bn::fixed tz, int frames, int min_frames = SHOT_MIN_FRAMES)
     {
-        frames = bn::max(frames, SHOT_MIN_FRAMES);
+        frames = bn::max(frames, min_frames);
+        bn::fixed gravity = GRAVITY + b.dip;
 
         for(int attempt = 0; attempt < 30; ++attempt, frames += 2)
         {
             b.vx = (tx - b.x - b.spin * (frames * (frames + 1) / 2)) / frames;
             b.vz = (tz - b.z) / frames;
-            b.vh = (GRAVITY * (frames * (frames + 1) / 2) - b.h) / frames;
+            b.vh = (gravity * (frames * (frames + 1) / 2) - b.h) / frames;
 
             if(b.vz == 0)
             {
@@ -416,7 +482,7 @@ namespace
 
             int t = t_net.ceil_integer();
 
-            if(height_after(b.h, b.vh, t) >= NET_HEIGHT + NET_MARGIN)
+            if(height_after(b.h, b.vh, t, gravity) >= NET_HEIGHT + NET_MARGIN)
             {
                 return;
             }
@@ -444,6 +510,21 @@ namespace
         bn::sprite_palettes::set_fade(bn::color(31, 31, 31), intensity);
     }
 
+    // Start during training: 0 = continue, 1 = change drill (back to the menu), 2 = quit to the map.
+    int training_pause()
+    {
+        sb::sfx(bn::sound_items::sfx_select);
+        sb::panel(9, 3, 12, 3);
+        sb::label title;
+        title.set(0, 3 * 8 - 80 + 8 + 4, "Paused", sb::text_color::BLUE, sb::align::CENTER);
+        constexpr bn::string_view items[] = { "Continue", "Change drill", "Quit to map" };
+        int choice = sb::menu(8, 7, items, 0, true);
+        title.clear();
+        sb::panel_clear();
+        sb::update();
+        return choice < 0 ? 0 : choice;
+    }
+
     // A character with a paddle.
     struct actor
     {
@@ -457,12 +538,16 @@ namespace
         int paddle_side = 1;    // +1: paddle on the screen-right, -1: screen-left
         int charge_side = 0;    // you, charging: +1 forehand (right), -1 backhand (left)
         bool charge_full = false;
+        int charge_pct = 0;     // how full the smash meter is (0..100): the paddle winds up further
+        int windup_t = 0;       // frames it has been winding up
+        bool topspin_jump = true;   // the swing (start_smash) jumps: yes for your smash, no for the CPU's shots
         int windup = 0;         // the CPU about to hit: +1 forehand (ball goes to the right of it on screen),
                                 // -1 backhand (ball goes to its left)
         bn::fixed swing_x, swing_y; // screen spot the swing aims at
         bool cheering = false;
         bool serve_stance = false;  // sideways and bent over, getting ready to serve
         int serve_swing = 0;        // counts down during the serve's own swing
+        int serve_dir = 1;          // serving: 1 = facing right (from the left half of the table), -1 = facing left
         bool facing_up;
 
         actor(int chr, bool up, bn::fixed start_x, bn::fixed start_z) :
@@ -495,11 +580,24 @@ namespace
             smash = 0;
         }
 
+        // The CPU's shots use the same swing as your smash (without the jump), from the side it wound up on.
+        void start_topspin(bn::fixed ball_x, bn::fixed ball_y_screen, int side)
+        {
+            smash = SMASH_ANIM_FRAMES;
+            swing = 0;
+            topspin_jump = false;
+            paddle_side = side;
+            swing_x = ball_x;
+            swing_y = ball_y_screen;
+        }
+
         void start_smash(bn::fixed ball_x, bn::fixed ball_y_screen)
         {
             smash = SMASH_ANIM_FRAMES;
             swing = 0;
-            paddle_side = ball_x >= x ? 1 : -1;
+            topspin_jump = true;
+            // Swing from the side it was wound up on (forehand right, backhand left).
+            paddle_side = charge_side != 0 ? charge_side : ball_x >= x ? 1 : -1;
             swing_x = ball_x;
             swing_y = ball_y_screen;
         }
@@ -513,7 +611,7 @@ namespace
             if(smash > 0)
             {
                 // A little jump: up for 6 frames, then back down.
-                lift = smash_t < 6 ? smash_t : bn::max(0, 12 - smash_t);
+                lift = ! topspin_jump ? 0 : smash_t < 4 ? smash_t : bn::max(0, 8 - smash_t);
             }
 
             int frame;
@@ -523,20 +621,22 @@ namespace
             {
                 frame = sb::FRAME_CHEER;
             }
-            else if(smash > 0 && smash_t < 5)
+            else if(smash > 0 && smash_t < 4)
             {
-                frame = sb::FRAME_CHEER;                // arms up, ready to slam
+                frame = sb::FRAME_SIDE;                 // still turned to the side it wound up on
+                flip = paddle_side < 0;
             }
             else if(serve_stance || serve_swing > 0)
             {
                 frame = sb::FRAME_SIDE;                 // side-on to the table, like a real serve
-                flip = ! facing_up;                     // (the CPU faces the other way)
+                flip = serve_dir < 0;                   // facing into the table from either side
                 lift = serve_stance ? -2 : 0;           // bent over a little while waiting
             }
             else if(charge_side != 0 || windup != 0)
             {
                 frame = sb::FRAME_SIDE;                 // body turned: forehand or backhand
-                flip = (charge_side != 0 ? charge_side : windup) < 0;
+                // Turned towards the paddle side: your charge side, or for the CPU the side opposite its shot.
+                flip = charge_side != 0 ? charge_side < 0 : windup > 0;
             }
             else
             {
@@ -571,32 +671,48 @@ namespace
             }
             else if(smash > 0)
             {
+                // Release, like a table tennis topspin: from the wind-up (low and back on its side), up and
+                // forward through the ball, then the arm carries on up across the body to finish high on the
+                // other side.
                 --smash;
+                int side = paddle_side;
+                bn::fixed top = cy - lift;
+                bn::fixed hit_x = swing_x - side * 3;
+                // Keyframes: frame time, paddle x, paddle y, paddle frame, which way the blade points.
+                struct key { int t; bn::fixed px, py; int frame, pside; };
+                // The CPU faces you, so "forwards" is down the screen: its follow-through stays flat and carries
+                // on across and towards you, only tilting up a little at the end.
+                const key cpu_keys[] = {
+                    { 0,  x + side * 11, top + 8,  3, side },
+                    { SMASH_CONTACT_FRAMES, hit_x, swing_y, 1, side },
+                    { 4,  x + side * 3,  top + 9,  1, side },
+                    { 6,  x - side * 5,  top + 11, 1, -side },
+                    { 8,  x - side * 10, top + 8,  4, -side },
+                    { SMASH_ANIM_FRAMES, x - side * 10, top + 8, 4, -side },
+                };
+                const key my_keys[] = {
+                    { 0,  x + side * 11, top + 8,  3, side },      // wound up: low and back, blade angled down
+                    { SMASH_CONTACT_FRAMES, hit_x, swing_y, 1, side },  // through the ball
+                    { 4,  x + side * 5,  top - 7,  4, side },      // rising in front of the body
+                    { 6,  x - side * 1,  top - 13, 0, side },      // up past the face
+                    { 8,  x - side * 7,  top - 15, 0, -side },     // finish: high, over on the other side
+                    { SMASH_ANIM_FRAMES, x - side * 7, top - 15, 0, -side },
+                };
+                const key* keys = facing_up ? my_keys : cpu_keys;
+                int k = 0;
 
-                if(smash_t <= 4)
+                while(k < 4 && smash_t >= keys[k + 1].t)
                 {
-                    // Raised high above the head.
-                    pframe = 0;
-                    px = x + paddle_side * 4;
-                    py = cy - 18 - lift;
+                    ++k;
                 }
-                else if(smash_t <= 8)
-                {
-                    // Slamming down through the ball.
-                    pframe = 1;
-                    bn::fixed f = bn::fixed(smash_t - 4) / 4;
-                    bn::fixed tx = swing_x - paddle_side * 3;
-                    px = x + paddle_side * 4 + (tx - x - paddle_side * 4) * f;
-                    py = cy - 18 - lift + (swing_y - (cy - 18 - lift)) * f;
-                }
-                else
-                {
-                    // Big follow-through, low and across the body.
-                    pframe = 2;
-                    px = x - paddle_side * 6;
-                    py = cy + 8;
-                    pside = -paddle_side;
-                }
+
+                const key& a = keys[k];
+                const key& b = keys[k + 1];
+                bn::fixed f = bn::fixed(bn::min(smash_t, b.t) - a.t) / (b.t - a.t);
+                px = a.px + (b.px - a.px) * f;
+                py = a.py + (b.py - a.py) * f;
+                pframe = f < bn::fixed(0.5) ? a.frame : b.frame;
+                pside = f < bn::fixed(0.5) ? a.pside : b.pside;
             }
             else if(swing > 0)
             {
@@ -626,7 +742,7 @@ namespace
                 // The serve: from low behind the body, brushing up under the ball and forward.
                 --serve_swing;
                 int t = SERVE_SWING_FRAMES - serve_swing;
-                int dir = facing_up ? 1 : -1;
+                int dir = serve_dir;
 
                 if(t <= 3)
                 {
@@ -654,7 +770,7 @@ namespace
             else if(serve_stance)
             {
                 // Paddle low and back behind the body.
-                int dir = facing_up ? 1 : -1;
+                int dir = serve_dir;
                 pframe = 2;
                 pside = -dir;
                 px = x - 9 * dir;
@@ -662,30 +778,33 @@ namespace
             }
             else if(charge_side != 0)
             {
-                // Pulled way back, trembling when the meter is full.
-                pframe = 1;
+                // Winding up: as the meter fills the paddle moves in a short arc back and down, close to the
+                // body, ending with the blade angled about 45 degrees down (where the release swing starts).
+                // It trembles when the meter is full.
+                bn::fixed f = bn::fixed(bn::min(charge_pct, 100)) / 100;
+                bn::fixed back = f < bn::fixed(0.5) ? f * 4 : bn::fixed(2);     // out a little first ...
+                bn::fixed down = f < bn::fixed(0.5) ? f * 4 : 2 + (f - bn::fixed(0.5)) * 6;   // ... then down
+                pframe = f < bn::fixed(0.5) ? 1 : 3;
                 pside = charge_side;
                 int shake = charge_full && (sb::frame_count() & 2) ? 1 : 0;
-                px = x + charge_side * 13 + shake;
-                py = cy - 5;
+                px = x + charge_side * (9 + back) + shake;
+                py = cy + 3 + down;
             }
-            else if(windup > 0)
+            else if(windup != 0)
             {
-                // Forehand: paddle pulled far back out to the right.
-                pframe = 1;
-                pside = 1;
-                px = x + 14;
-                py = cy - 3;
-            }
-            else if(windup < 0)
-            {
-                // Backhand: paddle tucked across the body on the left, blade down.
-                pframe = 2;
-                pside = -1;
-                px = x - 9;
-                py = cy + 2;
+                // The CPU about to hit: the same wind-up as your smash, back and down on the side it will hit
+                // from (forehand to its right on screen, backhand to its left).
+                bn::fixed f = bn::min(bn::fixed(windup_t) / 12, bn::fixed(1));
+                bn::fixed back = f < bn::fixed(0.5) ? f * 4 : bn::fixed(2);
+                bn::fixed down = f < bn::fixed(0.5) ? f * 4 : 2 + (f - bn::fixed(0.5)) * 6;
+                int side = -windup;     // its paddle starts on the other side from where the shot goes
+                pframe = f < bn::fixed(0.5) ? 1 : 3;
+                pside = side;
+                px = x + side * (9 + back);
+                py = cy + 3 + down;
             }
 
+            windup_t = windup != 0 ? windup_t + 1 : 0;
             paddle.set_tiles(bn::sprite_items::pingpong_paddle.tiles_item(), pframe);
             paddle.set_horizontal_flip(pside < 0);
             paddle.set_position(px.round_integer(), py.round_integer());
@@ -699,12 +818,13 @@ namespace
         bn::regular_bg_ptr table = bn::regular_bg_items::pingpong_table.create_bg(8, 48);
         bn::sprite_ptr ball_sprite = bn::sprite_items::pingpong_ball.create_sprite(0, 0, 1);
         bn::sprite_ptr shadow_sprite = bn::sprite_items::pingpong_shadow.create_sprite(0, 0, 0);
-        bn::sprite_ptr meter = bn::sprite_items::pingpong_meter.create_sprite(0, 0, 0);
+        bn::sprite_ptr meter = bn::sprite_items::pingpong_vmeter.create_sprite(0, 0, 0);
         bn::sprite_ptr burst = bn::sprite_items::pingpong_burst.create_sprite(0, 0, 0);
         bn::sprite_ptr serve_bar = bn::sprite_items::pingpong_vbar.create_sprite(0, 0, 0);
         bn::sprite_ptr serve_bar_top = bn::sprite_items::pingpong_vbar.create_sprite(0, 0, 1);
         bn::sprite_ptr serve_zone = bn::sprite_items::pingpong_vzone.create_sprite(0, 0, 0);
         bn::sprite_ptr serve_marker = bn::sprite_items::pingpong_vmark.create_sprite(0, 0, 0);
+        bn::sprite_ptr robot = bn::sprite_items::pingpong_robot.create_sprite(ROBOT_HEAD_X, ROBOT_HEAD_Y, 2);
         sb::label my_score_label, cpu_score_label;
         sb::label timing_label;
         int timing_timer = 0;
@@ -762,6 +882,9 @@ namespace
         int charge_button = 0;      // 1 = A (forehand), 2 = B (backhand)
         int charge = 0;
         bool last_perfect = false;  // your last hit was a PERFECT smash / shot
+        int ball_hold = 0;          // a smash or a CPU shot: frames until the paddle reaches the ball (it waits)
+        bool pending_perfect = false;
+        bool contact_by_cpu = false, contact_attack = false;
         int incoming_power = 0;     // how hard your last shot was (the CPU recovers slower from hard ones)
 
         // ---- effects
@@ -773,12 +896,30 @@ namespace
         cpu_plan plan = PLAN_NORMAL;
         bn::fixed cpu_target_x = 0, cpu_target_z = CPU_HOME_Z;
         bn::fixed cpu_shot_x = 0;   // where its next shot will go ...
-        bn::fixed cpu_shot_offset = 0; // ... as a distance from where it will stand (+ = to its right on screen)
-        int cpu_shot_side = 1;      // +1 forehand (to its right), -1 backhand: it shows this before it hits
+        int cpu_shot_side = 1;      // which way its shot goes on screen: +1 right (a forehand: its paddle starts on
+                                    // the screen-left, its own right hand), -1 left (a backhand). Its wind-up shows it.
         int cpu_reaction = 0;
+
+        // ---- training with the ball robot (no opponent, no crowd, the basement)
+        bool training = false;
+        bool in_basement = false;   // which room is on screen
+        int drill = DRILL_FOLLOW;
+        cpu_level train_settings = LEVELS[1];  // LEVELS[level] with the training smash timing
+        bn::fixed robot_aim = 0;    // where the head points: -2 (far left) .. 2 (far right)
+        bn::fixed robot_arrive_x = 0;   // where the next ball will reach you (x)
+        int follow_offset = 0;
+        bool caught = false;        // the ball is in the robot's net
+        bool back_to_menu = false;  // play() ended because "Change drill" was picked in the pause menu
+        bool target_ready = false;  // the robot has picked where its next ball goes (its head turns there)
+        int robot_wait = 1;         // frames in the SERVE state before the robot shoots
+        int rally_gap = TRAIN_PAUSE_FRAMES; // how long the POINT state lasts in training
+        const bn::sprite_item* ball_item = &bn::sprite_items::pingpong_ball;    // white, or orange (the robot's)
 
         match()
         {
+            robot.set_bg_priority(2);
+            robot.set_z_order(0);
+
             hall.set_priority(3);
             table.set_priority(2);
             ball_sprite.set_bg_priority(1);
@@ -846,7 +987,26 @@ namespace
             }
 
             points_to_win = POINTS_TO_WIN;
-            level = &LEVELS[g_level_choice];
+            training = g_training;
+            drill = g_drill_choice;
+
+            if(training)
+            {
+                // The robot doesn't think, so only your side of the settings matters, with training timing.
+                const train_level& t = TRAIN_LEVELS[g_level_choice];
+                train_settings = LEVELS[g_level_choice];
+                train_settings.sweet_front = t.sweet_front;
+                train_settings.sweet_back = t.sweet_back;
+                train_settings.charge_frames = t.charge_frames;
+                level = &train_settings;
+            }
+            else
+            {
+                level = &LEVELS[g_level_choice];
+            }
+
+            target_ready = false;
+            back_to_menu = false;
             me.reset();
             cpu.reset();
             me.emplace(sb::player_character(), true, bn::fixed(0), PLAYER_START_Z);
@@ -864,6 +1024,7 @@ namespace
             crowd.clear();
             int spot = 0;
 
+            // (Built for training too, so they're there if the menu shows the hall: set_room hides them.)
             for(int c = 0; c < sb::character_count && spot < 8; ++c)
             {
                 if(c == sb::player_character() || c == opponent)
@@ -888,11 +1049,56 @@ namespace
             hint_label.clear();
             score_label.clear();
             message_timer = 0;
+            set_room(training);
             start_serve();
             // play() shows the serve messages; keep the screen clean for the intro / result boxes.
             message_label.clear();
             hint_label.clear();
             draw();
+        }
+
+        // The rec hall (matches) or the basement with the ball robot (training). The menu calls this too,
+        // to show the room of whatever is highlighted.
+        void set_room(bool basement)
+        {
+            if(basement != in_basement)
+            {
+                in_basement = basement;
+                hall.set_item(basement ? bn::regular_bg_items::pingpong_basement : bn::regular_bg_items::pingpong_hall);
+                table.set_item(basement ? bn::regular_bg_items::pingpong_btable : bn::regular_bg_items::pingpong_table);
+            }
+
+            robot.set_visible(basement);
+
+            // The robot's balls are orange, like the ones in its hopper.
+            ball_item = basement ? &bn::sprite_items::pingpong_oball : &bn::sprite_items::pingpong_ball;
+            ball_sprite.set_item(*ball_item, 1);
+
+            for(bn::sprite_ptr& g : trail)
+            {
+                g.set_item(*ball_item, 0);
+            }
+
+            for(bn::sprite_ptr& f : flakes)
+            {
+                f.set_visible(! basement);
+            }
+
+            for(bn::sprite_ptr& l : lights)
+            {
+                l.set_visible(! basement);
+            }
+
+            for(spectator& sp : crowd)
+            {
+                sp.sprite.set_visible(! basement);
+            }
+
+            if(cpu)
+            {
+                cpu->sprite.set_visible(! basement);
+                cpu->paddle.set_visible(! basement);
+            }
         }
 
         bool deuce() const
@@ -908,6 +1114,11 @@ namespace
 
         int current_server() const
         {
+            if(training)
+            {
+                return drill == DRILL_SERVE ? PLAYER : CPU;     // CPU = the robot
+            }
+
             int total = my_points + cpu_points;
 
             if(deuce())
@@ -929,19 +1140,51 @@ namespace
             bounces = 0;
             serve_bounce_pending = false;
             cpu->serve_stance = false;
+            cpu->cheering = false;
+            cpu->windup = 0;
+            cpu_target_z = CPU_HOME_Z;
+            caught = false;
+            ball_hold = 0;
+            contact_by_cpu = false;
+
+            // Follow / Random flow like a rally: the robot's next ball leaves you where you are, still
+            // charging a smash if you are.
+            if(rally_drill())
+            {
+                hint_label.clear();
+                robot_wait = 1;
+
+                if(! target_ready)
+                {
+                    pick_robot_target();
+                }
+
+                hold_ball_at_server();
+                return;
+            }
+
             hide_serve_bar();
             serve_wait_release = false;
             stop_charging();
             me->cheering = false;
-            cpu->cheering = false;
-            cpu->windup = 0;
             me->z = PLAYER_START_Z;
-            cpu_target_z = CPU_HOME_Z;
             trail_timer = 0;
+
+            if(training)
+            {
+                message_label.clear();
+                message_timer = 0;
+
+                hint_label.set(-116, 70, "Hold A: topspin  B: backspin", sb::text_color::WHITE);
+
+                hold_ball_at_server();
+                return;
+            }
 
             if(server == CPU)
             {
                 cpu_target_x = sb::rand_range(0, 1) ? CPU_SERVE_CORNER_X : -CPU_SERVE_CORNER_X;
+                cpu->serve_dir = cpu_target_x > 0 ? -1 : 1;     // from its corner it faces into the table
                 bn::string<32> text(sb::character_name(opponent));
                 text.append(" serves");
                 show_message(text, sb::text_color::WHITE, 70);
@@ -962,11 +1205,149 @@ namespace
         {
             if(server == PLAYER)
             {
-                ball = { me->x + 9, me->z - 2, 2, 0, 0, 0, 0 };
+                ball = { me->x + 9 * me->serve_dir, me->z - 2, 2, 0, 0, 0, 0 };
+            }
+            else if(training)
+            {
+                ball = { robot_mouth_x(), ROBOT_MOUTH_Z, ROBOT_MOUTH_H, 0, 0, 0, 0 };
             }
             else
             {
-                ball = { cpu->x - 9, cpu->z + 2, 2, 0, 0, 0, 0 };
+                ball = { cpu->x + 9 * cpu->serve_dir, cpu->z + 2, 2, 0, 0, 0, 0 };
+            }
+        }
+
+        // ------------------------------------------------------------------------------- the ball robot
+        // Follow or Random: the robot keeps shooting and play never stops.
+        bool rally_drill() const
+        {
+            return training && drill != DRILL_SERVE;
+        }
+
+        bn::fixed robot_mouth_x() const
+        {
+            return bn::fixed(ROBOT_HEAD_X) + robot_aim * 2;
+        }
+
+        // Head frame 0..4 (far left .. far right) for an aim of -2..2.
+        int robot_frame() const
+        {
+            return bn::max(0, bn::min(4, (robot_aim + 2).round_integer()));
+        }
+
+        // Where the next ball will reach you: Follow aims at you, Random at the spot it picked.
+        bn::fixed robot_target_x() const
+        {
+            if(drill == DRILL_FOLLOW)
+            {
+                return clamp(me->x + follow_offset, -PLAYER_X_LIMIT + 6, PLAYER_X_LIMIT - 6);
+            }
+
+            return robot_arrive_x;
+        }
+
+        // Where the next ball goes: Follow aims at you when it shoots (give or take a little), Random picks
+        // a spot now. Picked as soon as you hit the robot's ball back, so its head has time to turn.
+        void pick_robot_target()
+        {
+            follow_offset = sb::rand_range(-FOLLOW_SPREAD, FOLLOW_SPREAD);
+            robot_arrive_x = sb::rand_range(-RANDOM_SPREAD, RANDOM_SPREAD);
+            target_ready = true;
+        }
+
+        // Every frame of Follow / Random: the head turns towards the next spot once it has one.
+        void turn_robot_head()
+        {
+            if(target_ready)
+            {
+                robot_aim = approach(robot_aim, clamp(robot_target_x() / 22, -2, 2), ROBOT_TURN_SPEED);
+            }
+        }
+
+        // Waiting to shoot (the ball is inside the robot).
+        void update_robot()
+        {
+            hold_ball_at_server();
+
+            if(timer >= robot_wait)
+            {
+                robot_feed();
+            }
+        }
+
+        void robot_feed()
+        {
+            const train_level& t = TRAIN_LEVELS[g_level_choice];
+            bn::fixed arrive_x = robot_target_x();
+            bn::fixed tz = sb::rand_range(16, 28);
+
+            // The ball keeps going the same way after its bounce, so to reach you at arrive_x it must land
+            // a bit closer to the middle: by the time it gets from tz to you it has moved on by
+            // (land - start) * (your z - tz) / (tz - start z).
+            bn::fixed r = (me->z - tz) / (tz - ROBOT_MOUTH_Z);
+            bn::fixed tx = (arrive_x + robot_mouth_x() * r) / (1 + r);
+            tx = clamp(tx, -(TABLE_HALF_W - 4), TABLE_HALF_W - 4);
+
+            ball = { robot_mouth_x(), ROBOT_MOUTH_Z, ROBOT_MOUTH_H, 0, 0, 0, 0 };
+            plan_shot(ball, tx, tz, t.feed_frames);
+            target_ready = false;
+            after_hit(CPU, SHOT_CPU_NORMAL, 0);
+            sb::sfx(bn::sound_items::sfx_paddle);
+        }
+
+        // The ball went past the far end of the table: the robot's net catches it and it drops into the tray.
+        void catch_ball()
+        {
+            caught = true;
+            ball.z = bn::max(ball.z, TABLE_FAR_Z - CATCH_BEYOND);
+            ball.x = clamp(ball.x, -NET_SIDE_X, NET_SIDE_X);
+            ball.h = bn::min(ball.h, NET_TOP_H);
+            ball.vx = 0;
+            ball.vz = 0;
+            ball.spin = 0;
+            ball.vh = bn::min(ball.vh, bn::fixed(0));
+        }
+
+        // One ball of training is over. Serve practice says how the serve went; Follow and Random just keep
+        // going at the pace of a rally: the next ball comes soon after yours lands in the net (or after a miss).
+        void training_rep(bool good, const bn::string_view& why)
+        {
+            point_decided = true;
+            st = state::POINT;
+            timer = 0;
+            serve_bounce_pending = false;
+
+            if(drill == DRILL_SERVE)
+            {
+                stop_charging();
+            }
+
+            if(drill == DRILL_SERVE)
+            {
+                // (How good the serve was already showed when you hit it: only a fault gets a message.)
+                rally_gap = TRAIN_PAUSE_FRAMES;
+                sb::sfx(good ? bn::sound_items::sfx_point : bn::sound_items::sfx_miss);
+
+                if(! good)
+                {
+                    show_message(why, sb::text_color::RED, TRAIN_PAUSE_FRAMES);
+                }
+
+                return;
+            }
+
+            // Follow / Random: no "ping" when your ball lands in the net, only the miss sound.
+            if(! good)
+            {
+                sb::sfx(bn::sound_items::sfx_miss);
+            }
+
+            const train_level& t = TRAIN_LEVELS[g_level_choice];
+            rally_gap = good ? t.feed_gap : t.miss_gap;
+
+            if(! target_ready)
+            {
+                pick_robot_target();
             }
         }
 
@@ -1179,27 +1560,51 @@ namespace
             stop_charging();
             last_perfect = perfect;
             after_hit(PLAYER, high ? SHOT_SMASH : SHOT_POWER, power);
-            start_trail(hit_x, hit_y, 40);
+
+            // The ball waits where it is until the paddle gets there (see tick), then the hit happens:
+            // trail, sound, and for a PERFECT one the hit-stop, flash, shake and star.
+            ball_hold = SMASH_CONTACT_FRAMES;
+            pending_perfect = perfect;
 
             if(perfect)
             {
-                freeze = PERFECT_FREEZE_FRAMES;
-                shake = PERFECT_SHAKE_FRAMES;
-                flash = PERFECT_FLASH;
-                start_burst(hit_x, hit_y);
-                start_whoosh();
-                sb::sfx(bn::sound_items::sfx_pp_perfect);
                 show_message(high ? "PERFECT SMASH!" : "PERFECT SHOT!", sb::text_color::YELLOW, 50);
             }
             else
             {
-                sb::sfx(bn::sound_items::sfx_smash);
                 show_message(high ? "Smash!" : "Power shot!", sb::text_color::YELLOW, 36);
 
                 // Why it wasn't PERFECT: a small hint over your head.
                 const char* why = dz < -level->sweet_front ? "Early" : dz > level->sweet_back ? "Late" :
                                   "More power";
                 show_timing_hint(why);
+            }
+        }
+
+        // The paddle reached the ball: off it goes.
+        void smash_contact()
+        {
+            if(contact_by_cpu)
+            {
+                contact_by_cpu = false;
+                sb::sfx(contact_attack ? bn::sound_items::sfx_smash : bn::sound_items::sfx_paddle);
+                return;
+            }
+
+            start_trail(ball.x, ball_screen_y(), 40);
+
+            if(pending_perfect)
+            {
+                freeze = PERFECT_FREEZE_FRAMES;
+                shake = PERFECT_SHAKE_FRAMES;
+                flash = PERFECT_FLASH;
+                start_burst(ball.x, ball_screen_y());
+                start_whoosh();
+                sb::sfx(bn::sound_items::sfx_pp_perfect);
+            }
+            else
+            {
+                sb::sfx(bn::sound_items::sfx_smash);
             }
         }
 
@@ -1244,7 +1649,15 @@ namespace
 
             // First the ball goes down onto your own side ...
             ball.spin = 0;
-            plan_shot(ball, ball.x + (tx - ball.x) / 4, SERVE_OWN_BOUNCE_Z, SERVE_FIRST_FRAMES);
+
+            if(fast && quality == SERVE_PERFECT)
+            {
+                plan_shot(ball, ball.x + (tx - ball.x) / 4, SERVE_OWN_BOUNCE_Z, SERVE_PERFECT_HOP_FRAMES, 1);
+            }
+            else
+            {
+                plan_shot(ball, ball.x + (tx - ball.x) / 4, SERVE_OWN_BOUNCE_Z, SERVE_FIRST_FRAMES);
+            }
 
             // ... then (after that bounce) on to here.
             serve_bounce_pending = true;
@@ -1258,9 +1671,11 @@ namespace
 
             if(quality == SERVE_PERFECT)
             {
-                // A short pause, a ghost trail behind the ball, a star and a whoosh.
-                freeze = PERFECT_FREEZE_FRAMES - 2;
-                flash = PERFECT_FLASH / 2;
+                // Like a PERFECT smash: hit-stop, flash, shake, a ghost trail behind the ball (again after its
+                // first bounce, see update_ball), a star and a whoosh.
+                freeze = PERFECT_FREEZE_FRAMES;
+                flash = PERFECT_FLASH;
+                shake = PERFECT_SHAKE_FRAMES;
                 start_trail(hit_x, hit_y, 30);
                 start_burst(hit_x, hit_y);
                 start_whoosh();
@@ -1317,12 +1732,13 @@ namespace
         void cpu_hit()
         {
             int speedup = bn::min(rally_hits / RALLY_HITS_PER_SPEEDUP, RALLY_SPEEDUP_MAX);
-            cpu->start_swing(ball.x, ball_screen_y());
+            // (Its paddle is on the other side from where the shot goes, then swings across.)
+            cpu->start_topspin(ball.x, ball_screen_y(), cpu->windup != 0 ? -cpu->windup : ball.x >= cpu->x ? 1 : -1);
             cpu->windup = 0;
             ball.spin = 0;
             shot_kind kind = SHOT_CPU_NORMAL;
-            // Its shot goes to the side it showed: right of it for a forehand, left for a backhand.
-            bn::fixed tx = clamp(cpu->x + cpu_shot_offset, -(TABLE_HALF_W - 4), TABLE_HALF_W - 4);
+            // Its shot goes the way it showed (see think_cpu).
+            bn::fixed tx = cpu_shot_x;
 
             switch(plan)
             {
@@ -1373,7 +1789,12 @@ namespace
             }
 
             after_hit(CPU, kind, 0);
-            sb::sfx(kind == SHOT_CPU_ATTACK ? bn::sound_items::sfx_smash : bn::sound_items::sfx_paddle);
+
+            // Like yours, the ball waits for its paddle; the sound comes on contact.
+            ball_hold = SMASH_CONTACT_FRAMES;
+            pending_perfect = false;
+            contact_by_cpu = true;
+            contact_attack = kind == SHOT_CPU_ATTACK;
         }
 
         void after_hit(int who, shot_kind kind, int power)
@@ -1390,6 +1811,12 @@ namespace
             if(who == PLAYER)
             {
                 incoming_power = power;
+
+                if(training && drill != DRILL_SERVE)
+                {
+                    pick_robot_target();
+                }
+
                 think_cpu(kind, power);
             }
             else
@@ -1407,6 +1834,11 @@ namespace
         // and decides what to do with it (and where its own shot will go).
         void think_cpu(shot_kind kind, int power)
         {
+            if(training)
+            {
+                return;     // the robot never hits back: the ball just flies into its net
+            }
+
             ball_state b = ball;
             int bounce_count = 0;
             int home_frame = -1, any_frame = -1, last_frame = 0;
@@ -1573,24 +2005,21 @@ namespace
                 break;
             }
 
-            // Forehand or backhand? Seen on screen, a forehand sends the ball to the right of where it
-            // stands, a backhand to the left. Near the edge of the table only one of them fits.
-            cpu_shot_offset = cpu_shot_x - cpu_target_x;
-
-            if(cpu_target_x > 26)
+            // Forehand or backhand? It faces you, so its forehand (its right hand, on the screen-left) swings
+            // across and sends the ball to the screen-right, and its backhand the other way, like yours seen in
+            // a mirror. The shot goes at least a little to one side of where it meets the ball.
+            if(bn::abs(cpu_shot_x - at.x) < 10)
             {
-                cpu_shot_offset = -bn::max(bn::abs(cpu_shot_offset), bn::fixed(12));
-            }
-            else if(cpu_target_x < -26)
-            {
-                cpu_shot_offset = bn::max(bn::abs(cpu_shot_offset), bn::fixed(12));
-            }
-            else if(bn::abs(cpu_shot_offset) < 10)
-            {
-                cpu_shot_offset = cpu_shot_offset >= 0 ? 10 : -10;
+                cpu_shot_x = at.x + (cpu_shot_x >= at.x ? 10 : -10);
             }
 
-            cpu_shot_side = cpu_shot_offset >= 0 ? 1 : -1;
+            cpu_shot_x = clamp(cpu_shot_x, -(TABLE_HALF_W - 4), TABLE_HALF_W - 4);
+            cpu_shot_side = cpu_shot_x >= at.x ? 1 : -1;
+
+            // It stands so the ball comes to its paddle side: right of the ball for a forehand, left of it for a
+            // backhand.
+            int paddle = -cpu_shot_side;
+            cpu_target_x = clamp(at.x - paddle * CPU_HAND_OFFSET, -CPU_X_LIMIT, CPU_X_LIMIT);
 
             if(DEBUG_LOG)
             {
@@ -1604,6 +2033,12 @@ namespace
         {
             if(point_decided)
             {
+                return;
+            }
+
+            if(training)
+            {
+                training_rep(winner == PLAYER, why);
                 return;
             }
 
@@ -1671,7 +2106,34 @@ namespace
                 return;
             }
 
+            bool at_back_net = ball.z < TABLE_FAR_Z - CATCH_BEYOND;
+            bool at_side_net = ball.z < NET_SIDE_FROM_Z && bn::abs(ball.x) > NET_SIDE_X;
+
+            if(training && ! caught && hitter == PLAYER && ! serve_bounce_pending && (at_back_net || at_side_net))
+            {
+                // Into the robot's net: in if it bounced on the robot's side first, long if it didn't.
+                catch_ball();
+
+                if(! point_decided)
+                {
+                    if(bounces >= 1)
+                    {
+                        receiver_failed();
+                    }
+                    else
+                    {
+                        hitter_fault("Long!");
+                    }
+                }
+            }
+
             contact c = step_ball(ball);
+
+            if(caught && ball.h <= NET_REST_H)
+            {
+                ball.h = NET_REST_H;    // dropped into the tray
+                ball.vh = 0;
+            }
 
             if(point_decided)
             {
@@ -1711,7 +2173,14 @@ namespace
 
                     // A good serve: on over the net now.
                     ball.spin = serve_spin;
+                    ball.dip = hitter == PLAYER && last_shot == SHOT_SERVE_FAST && serve_quality_of_last == SERVE_PERFECT ?
+                               SERVE_TOPSPIN_DIP : bn::fixed(0);
                     plan_shot(ball, serve_tx, serve_tz, serve_frames);
+
+                    if(hitter == PLAYER && serve_quality_of_last == SERVE_PERFECT)
+                    {
+                        start_trail(ball.x, ball_screen_y(), 40);
+                    }
 
                     if(hitter == PLAYER)
                     {
@@ -1787,7 +2256,7 @@ namespace
                     sb::sfx(bn::sound_items::sfx_whoosh);
                 }
             }
-            else
+            else if(! training)
             {
                 bn::fixed dx = ball.x - cpu->x;
                 bn::fixed dz = ball.z - cpu->z;
@@ -1837,6 +2306,8 @@ namespace
 
             if(! serve_aiming)
             {
+                // On the right half of the table you face left and serve the other way.
+                me->serve_dir = me->x > 0 ? -1 : 1;
                 bool a = bn::keypad::a_pressed();
                 bool b = bn::keypad::b_pressed();
 
@@ -1868,7 +2339,7 @@ namespace
             }
 
             // Next to you, on your left.
-            int bx = (me->x - 20).round_integer();
+            int bx = (me->x - 20 * me->serve_dir).round_integer();    // on the side away from the swing
             int bottom = me->center_y() + 14;          // screen y of the bar's bottom end
             serve_bar.set_position(bx, bottom - 16);
             serve_bar_top.set_position(bx, bottom - 48);
@@ -1883,7 +2354,7 @@ namespace
             // The ball is tossed up while the marker climbs, and falls back to paddle height exactly when the
             // marker reaches the middle of the red box (then keeps falling if you wait).
             bn::fixed f = serve_mark / serve_zone_pos;
-            ball.x = me->x + 6;
+            ball.x = me->x + 6 * me->serve_dir;
             ball.z = me->z - 3;
             ball.h = bn::max(bn::fixed(SERVE_PADDLE_HEIGHT) + SERVE_TOSS_HEIGHT * 4 * f * (1 - f), bn::fixed(-8));
             ball.vh = 0;
@@ -1898,6 +2369,12 @@ namespace
                 serve_quality_of_last = miss <= level->serve_perfect ? SERVE_PERFECT :
                                         miss <= level->serve_strong ? SERVE_GOOD :
                                         miss <= level->serve_ok ? SERVE_OK : SERVE_WEAK;
+
+                if(serve_quality_of_last != SERVE_PERFECT)
+                {
+                    // Let go below the red box = early, above it = late.
+                    show_timing_hint(serve_mark < serve_zone_pos ? "Early" : "Late");
+                }
                 hide_serve_bar();
                 hint_label.clear();
                 player_serve(serve_quality_of_last);    // hit the ball right where it is in the toss
@@ -1909,7 +2386,8 @@ namespace
             a_hold = bn::keypad::a_held() ? a_hold + 1 : 0;
             b_hold = bn::keypad::b_held() ? b_hold + 1 : 0;
 
-            bool can_charge = st == state::RALLY && ! point_decided && ! me->cheering;
+            // (In Follow / Random you can wind up any time, even before the robot's next ball is out.)
+            bool can_charge = ((st == state::RALLY && ! point_decided) || rally_drill()) && ! me->cheering;
 
             if(! charging)
             {
@@ -1919,6 +2397,7 @@ namespace
                     charge_button = a_hold >= CHARGE_START_FRAMES ? 1 : 2;
                     charge = a_hold >= CHARGE_START_FRAMES ? a_hold - CHARGE_START_FRAMES : b_hold - CHARGE_START_FRAMES;
                     me->charge_side = charge_button == 1 ? 1 : -1;
+                    me->charge_pct = charge * 100 / level->charge_frames;
                     a_age = b_age = 1000;   // not a tap
                 }
 
@@ -1942,6 +2421,7 @@ namespace
 
                 charge = bn::min(charge + 1, level->charge_frames);
                 me->charge_full = charge >= level->charge_frames;
+                me->charge_pct = charge * 100 / level->charge_frames;
             }
             else
             {
@@ -2062,6 +2542,12 @@ namespace
             switch(st)
             {
             case state::SERVE:
+                if(training && server == CPU)
+                {
+                    update_robot();
+                    break;
+                }
+
                 hold_ball_at_server();
                 // A gentle bounce in the hand.
                 ball.h = 2 + ((timer / 8) % 2);
@@ -2104,12 +2590,32 @@ namespace
                 break;
 
             case state::RALLY:
+                if(ball_hold > 0)
+                {
+                    if(--ball_hold == 0)
+                    {
+                        smash_contact();
+                    }
+
+                    break;
+                }
+
                 update_ball();
                 check_hits();
                 break;
 
             case state::POINT:
                 update_ball();
+
+                if(training)
+                {
+                    if(timer >= rally_gap)
+                    {
+                        start_serve();
+                    }
+
+                    break;
+                }
 
                 if(timer >= POINT_PAUSE_FRAMES)
                 {
@@ -2159,6 +2665,12 @@ namespace
             }
 
             update_cpu_tell();
+
+            if(training && drill != DRILL_SERVE)
+            {
+                turn_robot_head();
+            }
+
             draw_actors(me_moving, cpu_moving);
             draw_ball();
             animate_scenery();
@@ -2169,15 +2681,23 @@ namespace
         {
             me->draw(me_moving);
             cpu->draw(cpu_moving);
+            cpu->sprite.set_visible(! in_basement);
+            cpu->paddle.set_visible(! in_basement);
 
-            // The power meter floats above your head while you charge.
+            if(in_basement)
+            {
+                robot.set_tiles(bn::sprite_items::pingpong_robot.tiles_item(), robot_frame());
+            }
+
+            // The power meter stands beside you while you charge, on the paddle's side (right for a forehand,
+            // left for a backhand), so it never hides the ball.
             meter.set_visible(charging);
 
             if(charging)
             {
                 int f = bn::min(charge * 8 / level->charge_frames, 8);
-                meter.set_tiles(bn::sprite_items::pingpong_meter.tiles_item(), f);
-                meter.set_position(me->x.round_integer(), me->center_y() - 22);
+                meter.set_tiles(bn::sprite_items::pingpong_vmeter.tiles_item(), f);
+                meter.set_position((me->x + me->charge_side * 21).round_integer(), me->center_y() - 2);
             }
         }
 
@@ -2190,9 +2710,13 @@ namespace
 
         void draw_ball()
         {
-            bool hidden = st == state::DONE || (st == state::POINT && timer > POINT_PAUSE_FRAMES - 10);
+            // (In Follow / Random the ball stays in the net until the robot shoots the next one.)
+            bool fades = st == state::POINT && (! training || drill == DRILL_SERVE);
+            int pause = training ? TRAIN_PAUSE_FRAMES : POINT_PAUSE_FRAMES;
+            bool hidden = st == state::DONE || (fades && timer > pause - 10) ||
+                          (training && server == CPU && st == state::SERVE);   // still inside the robot
             ball_sprite.set_visible(! hidden);
-            shadow_sprite.set_visible(! hidden);
+            shadow_sprite.set_visible(! hidden && ! caught);
 
             // Ghost balls behind a smash.
             for(int i = TRAIL_LENGTH * 3 - 1; i > 0; --i)
@@ -2216,7 +2740,7 @@ namespace
 
                 if(show)
                 {
-                    int k = (i + 1) * 3;
+                    int k = (i + 1) * 3 - 1;    // 2, 5, 8: (i + 1) * 3 read past the end, the sideways ghost
                     trail[i].set_position(history_x[k].round_integer(), history_y[k].round_integer());
                 }
             }
@@ -2227,11 +2751,11 @@ namespace
             }
 
             int frame = ball.h > 24 ? 2 : ball.h < -4 ? 0 : 1;
-            ball_sprite.set_tiles(bn::sprite_items::pingpong_ball.tiles_item(), frame);
+            ball_sprite.set_tiles(ball_item->tiles_item(), frame);
             ball_sprite.set_position(ball.x.round_integer(), ball_screen_y().round_integer());
 
             // Hidden behind the table's far edge, or behind the CPU?
-            bool behind_table = ball.z < TABLE_FAR_Z && ball.h < 0;
+            bool behind_table = ball.z < TABLE_FAR_Z && ball.h < 0 && ! caught;   // (caught: in front of the net)
             bool behind_cpu = ball.z < cpu->z;
 
             if(behind_table || behind_cpu)
@@ -2250,7 +2774,9 @@ namespace
             bn::fixed shadow_y = ball.z + NET_SCREEN_Y + (on_table ? bn::fixed(0) : TABLE_HEIGHT);
             shadow_sprite.set_position(ball.x.round_integer(), shadow_y.round_integer());
             bn::fixed above = ball.h - (on_table ? bn::fixed(0) : -TABLE_HEIGHT);
-            shadow_sprite.set_tiles(bn::sprite_items::pingpong_shadow.tiles_item(), above > 20 ? 1 : 0);
+            // A high ball gets the smaller, lighter shadow, except in the basement: on its dark table that one
+            // looks lighter than the table (grey), so it keeps the dark shadow.
+            shadow_sprite.set_tiles(bn::sprite_items::pingpong_shadow.tiles_item(), above > 20 && ! in_basement ? 1 : 0);
 
             if(! on_table && ball.z < TABLE_FAR_Z + 2)
             {
@@ -2322,6 +2848,7 @@ namespace
 
             hall.set_position(8 + dx, 48 + dy);
             table.set_position(8 + dx, 48 + dy);
+            robot.set_position(ROBOT_HEAD_X + dx, ROBOT_HEAD_Y + dy);
 
             if(flash > 0)
             {
@@ -2403,8 +2930,13 @@ namespace
         // Plays one match. Returns false if the player quit from the pause menu.
         bool play()
         {
-            update_score_label();
+            if(! training)
+            {
+                update_score_label();
+            }
+
             start_serve();
+            robot_wait = ROBOT_FIRST_WAIT;
 
             while(true)
             {
@@ -2415,7 +2947,20 @@ namespace
                 {
                     clear_effects();
                     set_paused_visibility(false);
-                    bool quit = sb::game_pause();
+                    bool quit;
+
+                    if(training)
+                    {
+                        // Training never ends: the pause menu is the way out (or to another drill).
+                        int choice = training_pause();
+                        back_to_menu = choice == 1;
+                        quit = choice != 0;
+                    }
+                    else
+                    {
+                        quit = sb::game_pause();
+                    }
+
                     set_paused_visibility(true);
 
                     if(quit)
@@ -2449,22 +2994,130 @@ namespace
         }
     };
 
-    // Asks for the difficulty. Returns false to go back to the map.
-    bool choose_match_settings()
+    // The one-screen menu before playing: Match or Training, the drill (training only) and the level.
+    // Up/Down picks a row, Left/Right changes it, A starts, B goes back to the map. The room behind the
+    // box follows the Play row (the hall for a match, the basement for training). Remembers the last choice.
+    bool choose_settings(match& g, bool start_on_level)
     {
-        sb::label title;
-        title.set(0, -60, "How good is your opponent?", sb::text_color::WHITE, sb::align::CENTER);
+        constexpr bn::string_view plays[] = { "Match", "Training" };
+        constexpr bn::string_view drills[] = { "Serve", "Follow", "Random" };
         constexpr bn::string_view levels[] = { "Easy", "Medium", "Hard" };
-        int lvl = sb::menu(11, 5, levels, g_level_choice, true);
-        sb::panel_clear();
+        constexpr bn::string_view names[] = { "Play", "Drill", "Level" };
+        constexpr const char* match_hint = "Play an opponent.";
+        constexpr const char* drill_hints[] = { "Practise your serve.", "The robot aims at you.", "Watch where it aims!" };
+        constexpr int box_x = 2, box_w = 26;
+        constexpr int option_x = (box_x + 7) * 8 - 120;  // where the choices start (Butano x)
 
-        if(lvl < 0)
+        int values[3] = { g_training ? 1 : 0, g_drill_choice, g_level_choice };
+        constexpr int counts[3] = { 2, 3, 3 };
+        int row = start_on_level ? (g_training ? 2 : 1) : 0;    // index into the visible rows
+        bool redraw = true;
+        sb::label row_names[3], options[3][3], cursor, hint;
+
+        while(true)
         {
-            return false;
-        }
+            bool training = values[0] == 1;
+            int kinds[3] = { 0, 1, 2 };     // Play, Drill, Level (no Drill row for a match)
+            int rows = 3;
 
-        g_level_choice = lvl;
-        return true;
+            if(! training)
+            {
+                kinds[1] = 2;
+                rows = 2;
+            }
+
+            if(redraw)
+            {
+                redraw = false;
+                g.set_room(training);
+
+                for(sb::label& l : row_names)
+                {
+                    l.clear();
+                }
+
+                for(auto& list : options)
+                {
+                    for(sb::label& l : list)
+                    {
+                        l.clear();
+                    }
+                }
+
+                // The top stays put (so the Play row doesn't jump): the box grows down for the Drill row.
+                int box_h = rows * 2 + 4;
+                int box_y = (20 - (3 * 2 + 4)) / 2;
+                sb::panel_clear();
+                sb::panel(box_x, box_y, box_w, box_h);
+
+                for(int r = 0; r < rows; ++r)
+                {
+                    int kind = kinds[r];
+                    int y = (box_y + 1 + r * 2) * 8 - 80 + 8;
+                    const bn::string_view* list = kind == 0 ? plays : kind == 1 ? drills : levels;
+                    row_names[r].set((box_x + 2) * 8 - 120, y, names[kind], sb::text_color::DARK);
+                    int x = option_x;
+
+                    for(int i = 0; i < counts[kind]; ++i)
+                    {
+                        bool chosen = values[kind] == i;
+                        bn::string<16> text;
+
+                        if(chosen && r == row)
+                        {
+                            text.append("<");
+                            text.append(list[i]);
+                            text.append(">");
+                        }
+                        else
+                        {
+                            text.append(list[i]);
+                        }
+
+                        sb::text_color color = ! chosen ? sb::text_color::DARK :
+                                               r == row ? sb::text_color::RED : sb::text_color::BLUE;
+                        options[r][i].set(x, y, text, color);
+                        x += sb::text_width(text) + 8;
+                    }
+                }
+
+                cursor.set(box_x * 8 - 120 + 8, (box_y + 1 + row * 2) * 8 - 80 + 8, ">", sb::text_color::RED);
+                hint.set(0, (box_y + 1 + rows * 2) * 8 - 80 + 8, training ? drill_hints[values[1]] : match_hint,
+                         sb::text_color::DARK, sb::align::CENTER);
+            }
+
+            sb::update();
+            int kind = kinds[row];
+
+            if(bn::keypad::up_pressed() || bn::keypad::down_pressed())
+            {
+                row = (row + (bn::keypad::up_pressed() ? rows - 1 : 1)) % rows;
+                sb::sfx(bn::sound_items::sfx_select);
+                redraw = true;
+            }
+            else if(bn::keypad::left_pressed() || bn::keypad::right_pressed())
+            {
+                int n = counts[kind];
+                values[kind] = (values[kind] + (bn::keypad::left_pressed() ? n - 1 : 1)) % n;
+                sb::sfx(bn::sound_items::sfx_select);
+                redraw = true;
+            }
+            else if(bn::keypad::a_pressed())
+            {
+                sb::sfx(bn::sound_items::sfx_confirm);
+                g_training = training;
+                g_drill_choice = values[1];
+                g_level_choice = values[2];
+                sb::panel_clear();
+                return true;
+            }
+            else if(bn::keypad::b_pressed())
+            {
+                sb::sfx(bn::sound_items::sfx_back);
+                sb::panel_clear();
+                return false;
+            }
+        }
     }
 
     // The result box: who won, and the best result on every difficulty. Returns true to play again.
@@ -2599,6 +3252,7 @@ void sb::pingpong_run()
         fade_in();
 
         bool first = true;
+        bool changing_drill = false;
 
         while(true)
         {
@@ -2632,6 +3286,18 @@ void sb::pingpong_run()
                     "#Win",
                     "First to 5 points, and",
                     "you must win by 2.",
+                    "",
+                    "#Training",
+                    "Pick Training in the menu",
+                    "to practise in the",
+                    "basement with the ball",
+                    "robot. Serve: serve into",
+                    "its net. Follow: it shoots",
+                    "at you, just time your",
+                    "swing. Random: it shoots",
+                    "all over: watch its head",
+                    "to see where it aims.",
+                    "Start: change drill, quit.",
                 };
 
                 if(! game_intro(GAME_PINGPONG, howto))
@@ -2642,15 +3308,23 @@ void sb::pingpong_run()
                 first = false;
             }
 
-            if(! choose_match_settings())
+            if(! choose_settings(g, changing_drill))
             {
                 break;
             }
 
             g.new_match();
+            changing_drill = false;
 
             if(! g.play())
             {
+                if(g.back_to_menu)
+                {
+                    changing_drill = true;  // the menu opens on the Level row
+                    g.hide_hud();   // "Change drill" in the pause menu: back to the menu
+                    continue;
+                }
+
                 break;
             }
 

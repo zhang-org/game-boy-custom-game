@@ -11,8 +11,9 @@ canvas pixel (0, 0) is the top-left corner of the screen):
 Sprites:
   pingpong_ball    8x8, 3 frames: small / normal / big (the ball grows a little when high)
   pingpong_shadow  8x8, 2 frames: normal / small
-  pingpong_paddle  16x16, 3 frames, blade to the RIGHT of the handle (flip for backhand):
-                   0 rest (blade up), 1 swing (blade level), 2 follow-through (blade down)
+  pingpong_paddle  16x16, 5 frames, blade to the RIGHT of the handle (flip for backhand):
+                   0 rest (blade up), 1 swing (blade level), 2 follow-through (blade down),
+                   3 smash wind-up (blade 45 degrees down), 4 smash rising (blade 45 degrees up)
   pingpong_flake   8x8, 2 frames: snowflakes falling behind the window glass
   pingpong_light   8x8, 2 frames: a tree light (on / off) for twinkling
 
@@ -471,7 +472,7 @@ HANDLE_DARK = rgb("#885030")
 
 
 def make_paddle():
-    c = Canvas(16, 48)
+    c = Canvas(16, 80)
     legend = {"o": OUTLINE, "r": PAD, "d": PAD_DARK, "l": PAD_LIGHT, "h": HANDLE, "H": HANDLE_DARK}
     # Hand position in every frame is about (5, 11).
     frames = [
@@ -526,6 +527,40 @@ def make_paddle():
          ".....oddddo.....",
          "......oooo......",
          "................"],
+        # smash wind-up: blade 45 degrees down-right
+        ["................",
+         "................",
+         "..ooo...........",
+         "..oHho..........",
+         "...oHho.........",
+         "....oHhoo.......",
+         ".....oollroo....",
+         "......olrrrdo...",
+         ".....olrrrrrdo..",
+         ".....orrrrrrdo..",
+         ".....orrrrrrdo..",
+         "......odrrrdo...",
+         ".......odddo....",
+         "........ooo.....",
+         "................",
+         "................"],
+        # smash rising: blade 45 degrees up-right
+        ["................",
+         "................",
+         "........ooo.....",
+         ".......olllo....",
+         "......olrrrdo...",
+         ".....olrrrrrdo..",
+         ".....orrrrrrdo..",
+         ".....orrrrrrdo..",
+         "......odrrrdo...",
+         ".....oodddoo....",
+         "....oHhoo.......",
+         "...oHho.........",
+         "..oHho..........",
+         "..ooo...........",
+         "................",
+         "................"],
     ]
     for i, rows in enumerate(frames):
         c.ascii(0, i * 16, rows, legend)
@@ -574,6 +609,25 @@ def make_meter():
         c.vline(23, y0 + 2, y0 + 5, white)          # where "perfect" starts
         if f == 8:
             c.hline(1, 30, y0 + 2, white)
+    return c
+
+
+def make_vmeter():
+    """The smash meter, standing up beside the paddle while you charge: 8x32, 9 frames (empty .. full),
+    filling from the bottom. The top quarter is gold: release there (with good timing) for a PERFECT shot."""
+    out_, back, green, gold, red, white = METER_PALETTE[:6]
+    c = Canvas(8, 32 * 9)
+    for f in range(9):
+        y0 = f * 32
+        c.rect(1, y0, 6, 32, out_)
+        c.rect(2, y0 + 1, 4, 30, back)
+        fill = round(30 * f / 8)
+        for i in range(fill):
+            col = green if i < 22 else gold
+            c.rect(2, y0 + 30 - i, 4, 1, col)
+        c.hline(2, 5, y0 + 30 - 22, white)          # where "perfect" starts
+        if f == 8:
+            c.vline(2, y0 + 1, y0 + 30, white)
     return c
 
 
@@ -680,6 +734,7 @@ def main():
         save_sprite(name, canvas, h, shared)
     # The meter and the burst share one palette, so together they use one of the 16 sprite palettes.
     save_sprite("pingpong_meter", make_meter(), 8, METER_PALETTE)
+    save_sprite("pingpong_vmeter", make_vmeter(), 32, METER_PALETTE)
     save_sprite("pingpong_burst", make_burst(), 16, METER_PALETTE)
     save_sprite("pingpong_vbar", make_serve_bar(), 32, METER_PALETTE)
     save_sprite("pingpong_vzone", make_serve_zones(), 32, METER_PALETTE)
