@@ -2482,7 +2482,11 @@ namespace
             bn::fixed old_x = me->x, old_z = me->z;
             bn::fixed factor = charging ? CHARGE_MOVE_FACTOR : bn::fixed(1);
 
-            if(! me->cheering)
+            // While you hold A or B to serve, Left / Right only aim the serve (player_serve reads them when you let
+            // go): you keep your serving spot. You can move again once the ball is away.
+            bool aiming_serve = server == PLAYER && st == state::SERVE && serve_aiming;
+
+            if(! me->cheering && ! aiming_serve)
             {
                 if(bn::keypad::left_held())
                 {
@@ -2492,7 +2496,10 @@ namespace
                 {
                     me->x += PLAYER_SPEED * factor;
                 }
+            }
 
+            if(! me->cheering)
+            {
                 // During your own serve you stay at the serving line.
                 if(! (server == PLAYER && (st == state::SERVE || st == state::TOSS)))
                 {
